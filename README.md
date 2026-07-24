@@ -1,4 +1,4 @@
-# 🧠 汉英 NLP 分析工具
+# 汉英 NLP 分析工具
 
 [![Python](https://img.shields.io/badge/Python-3.11+-blue.svg)](https://www.python.org/)
 [![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
@@ -6,7 +6,7 @@
 
 > 基于 Python + Tkinter 的跨语言 NLP 桌面工具 — 分词 · 依存句法 · 情感分析 · 语言指纹 · 可读性 · 图表
 
-**作者：** [Fragesius](https://github.com/Fragesius) | 英语专业 · 计算语言学方向
+**作者：** [Fragesius](https://github.com/Fragesius) | 翻译专业 · 计算语言学
 
 ---
 
@@ -95,13 +95,3 @@ nlptool/
 | 关键词 | TF-IDF |
 | 可视化 | matplotlib + wordcloud |
 | 语言指纹 | 纯 Python（无 scipy 依赖，自实现统计检验） |
-
----
-
-## 📝 License
-
-MIT © 2026 Fragesius
-
----
-
-> *Built by a linguistics student diving into NLP. 为中国人自己的 AI 而努力。* 🇨🇳
