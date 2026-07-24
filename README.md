@@ -1,67 +1,107 @@
-# 汉英 NLP 分析工具
+# 🧠 汉英 NLP 分析工具
 
-作者：Fragesius
+[![Python](https://img.shields.io/badge/Python-3.11+-blue.svg)](https://www.python.org/)
+[![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
+[![Platform](https://img.shields.io/badge/Platform-Windows-lightgrey.svg)]()
 
-一个基于 Python + Tkinter 的 Windows 桌面 NLP 工具，支持汉语与英语的语言分析。
-采用**混合模式**：本地 jieba / spaCy 完成基础分析，可选调用在线 API 执行高级分析。
+> 基于 Python + Tkinter 的跨语言 NLP 桌面工具 — 分词 · 依存句法 · 情感分析 · 语言指纹 · 可读性 · 图表
 
-## 功能
+**作者：** [Fragesius](https://github.com/Fragesius) | 英语专业 · 计算语言学方向
 
-| 模块 | 功能 |
-|------|------|
-| 基础分析 | 分词、词性标注、句子切分、字符/词数统计、词频、词性分布 |
-| 句法 / 语义 | 命名实体识别（NER）、关键词提取、依存句法、情感分析 |
-| 对比分析 | Flesch-Kincaid 英文可读性、中文可读性、中英双语对齐 |
-| 可视化 | 词云、词频柱状图、词性饼图、依存句法图、情感趋势图 |
+---
 
-## 安装
+## ✨ 功能
+
+### 🔤 基础分析
+- 中文分词（jieba + pkuseg）、英文分词（spaCy）
+- 词性标注、句子切分、字符/词数统计
+- 词频分布、词性比例分析
+
+### 🧬 句法 & 语义
+- 命名实体识别（NER）、关键词提取（TF-IDF）
+- 依存句法分析 & 可视化
+- 情感分析（中文 SnowNLP + 英文 VADER）
+
+### 🕵️ 语言指纹（Authorship Attribution）
+- 8 维度加权余弦相似度：虚词频率(0.30)、标点模式(0.15)、词 bigram(0.15)、词长(0.10)、句长(0.10)、TTR(0.10)、字 4-gram(0.05)、Hapax(0.05)
+- Wilcoxon 符号秩检验 + 置换检验(10k) + Cohen's d 效应量
+- 多作者对比判定 + 报告生成
+
+### 📊 可视化
+- 词云、词频柱状图、词性饼图、依存句法树
+- 情感趋势折线图、对比雷达图
+
+### 📖 可读性分析
+- Flesch-Kincaid 英文可读性
+- 中文文本可读性评估
+- 中英双语对齐分析
+
+### 🌐 可选 API 模式
+- 支持 OpenAI 兼容接口（GPT / GLM / DeepSeek 等）
+- 综合语言学分析、句法深度分析、文体风格分析
+- 配置保存在本地，不上传隐私
+
+---
+
+## 🚀 快速开始
 
 ```bash
-cd nlp_tool
+# 1. 安装依赖
 pip install -r requirements.txt
-python -m spacy download en_core_web_sm        # 英文模型（推荐）
-python -m spacy download zh_core_web_sm        # 中文模型（可选，用于 NER/依存）
-```
 
-> 未安装的库会被自动检测并优雅降级，应用仍可运行，仅相关功能不可用。
+# 2. 下载英文模型（推荐）
+python -m spacy download en_core_web_sm
 
-## 运行
-
-```bash
+# 3. 运行
 python main.py
 ```
 
-## API 配置（可选）
+> 未安装的库会自动降级，核心功能始终可用。
 
-菜单「设置 → API 配置」，填写任意 OpenAI 兼容接口：
+---
 
-- **Base URL**：例如 `https://api.openai.com/v1`
-- **API Key**：你的密钥
-- **模型**：例如 `gpt-4o-mini`
-
-配置保存在 `~/.nlp_tool_api.json`。配置后可在「句法 / 语义」标签页调用 API
-进行综合语言学分析、句法结构分析、文体风格分析等。
-
-## 项目结构
+## 📁 项目结构
 
 ```
-nlp_tool/
-├── main.py                # 入口
-├── requirements.txt
+nlptool/
+├── main.py                         # 入口
+├── requirements.txt                # 依赖
 ├── core/
-│   ├── analyzer.py        # 核心分析引擎（分词、词性、NER、关键词、情感）
-│   ├── comparison.py      # 可读性、中英对齐
-│   └── api_backend.py     # 可选在线 API
+│   ├── analyzer.py                 # 分词、词性、NER、关键词、情感
+│   ├── linguistic_fingerprint.py   # 语言指纹/作者识别引擎
+│   ├── comparison.py               # 可读性、中英对齐
+│   ├── api_backend.py              # 在线 API 后端
+│   ├── file_io.py                  # 文件读写
+│   ├── history.py                  # 分析历史
+│   └── _paths.py                   # 路径管理
 ├── viz/
-│   └── plots.py           # matplotlib 可视化
+│   └── plots.py                    # matplotlib 图表
 └── ui/
-    ├── main_window.py     # 主窗口与菜单
-    └── tabs.py            # 四个功能标签页
+    ├── main_window.py              # 主窗口 & 菜单
+    ├── tabs.py                     # 功能标签页
+    └── style.py                    # 界面样式
 ```
 
-## 后端说明
+---
 
-- **中文分词**：jieba（含词性标注 `jieba.posseg`）
-- **英文分析**：spaCy `en_core_web_sm`（词性、依存、NER、词形还原）
-- **情感分析**：中文 SnowNLP，英文 VADER（nltk）；缺失时回退到内置词典
-- **可视化**：matplotlib + wordcloud，已处理中文字体
+## ⚙️ 后端栈
+
+| 功能 | 后端 |
+|------|------|
+| 中文分词 & 词性 | jieba / pkuseg |
+| 英文 NLP | spaCy `en_core_web_sm` |
+| 中文情感 | SnowNLP |
+| 英文情感 | VADER（nltk） |
+| 关键词 | TF-IDF |
+| 可视化 | matplotlib + wordcloud |
+| 语言指纹 | 纯 Python（无 scipy 依赖，自实现统计检验） |
+
+---
+
+## 📝 License
+
+MIT © 2026 Fragesius
+
+---
+
+> *Built by a linguistics student diving into NLP. 为中国人自己的 AI 而努力。* 🇨🇳
