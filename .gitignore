@@ -1,0 +1,18 @@
+# 运行时用户数据（含历史记录、API 密钥等隐私信息）
+_data/
+
+# PyInstaller 构建产物
+build/
+dist/
+*.spec.bak
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+
+# IDE
+.vscode/
+.idea/
