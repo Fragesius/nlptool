@@ -4,6 +4,7 @@ _data/
 # PyInstaller 构建产物
 build/
 dist/
+*.spec
 *.spec.bak
 
 # Python
