@@ -6,7 +6,7 @@
 
 > 基于 Python + Tkinter 的跨语言 NLP 桌面工具 — 分词 · 依存句法 · 情感分析 · 语言指纹 · 可读性 · 图表
 
-**作者：** [Fragesius](https://github.com/Fragesius) | 英语专业 · 计算语言学方向
+**作者：** [Fragesius](https://github.com/Fragesius)
 
 ---
 
@@ -104,4 +104,4 @@ MIT © 2026 Fragesius
 
 ---
 
-> *Built by a linguistics student diving into NLP. 为中国人自己的 AI 而努力。* 🇨🇳
+> *Built with Python, linguistics, and curiosity.* 🧠
