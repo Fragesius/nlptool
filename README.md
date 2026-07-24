@@ -65,3 +65,7 @@ nlp_tool/
 - **英文分析**：spaCy `en_core_web_sm`（词性、依存、NER、词形还原）
 - **情感分析**：中文 SnowNLP，英文 VADER（nltk）；缺失时回退到内置词典
 - **可视化**：matplotlib + wordcloud，已处理中文字体
+
+## 目前还未解决的bug说明
+
+可视化分析依存句法时的排版有问题，目前还没有解决思路
