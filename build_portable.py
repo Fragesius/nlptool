@@ -25,8 +25,9 @@ SPEC_FILE = os.path.join(ROOT, "汉英NLP分析工具.spec")
 def run_pyinstaller():
     """运行 PyInstaller 打包。"""
     print("[1/4] PyInstaller 打包中...")
+    # --clean 清缓存；--noconfirm 自动覆盖已有输出目录（避免上一次构建残留导致失败）
     subprocess.check_call(
-        [sys.executable, "-m", "PyInstaller", "--clean", SPEC_FILE],
+        [sys.executable, "-m", "PyInstaller", "--clean", "--noconfirm", SPEC_FILE],
         cwd=ROOT,
     )
     if not os.path.isdir(BUILD_OUTPUT):
