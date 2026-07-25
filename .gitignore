@@ -17,3 +17,9 @@ venv/
 # IDE
 .vscode/
 .idea/
+
+# 临时调试文件（脚本与生成的测试图）
+_test_*.py
+_check_*.py
+_*.png
+_*.svg

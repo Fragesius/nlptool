@@ -6,12 +6,14 @@ import tkinter as tk
 from tkinter import ttk, scrolledtext, messagebox, filedialog
 from typing import Optional
 
-from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolbar2Tk
 from matplotlib.figure import Figure
 
 from core import analyzer, comparison, api_backend, history
 from ui.style import (
-    get_theme, register_theme_callback, FONT, FONT_MONO,
+    get_theme, register_theme_callback, is_compact_mode,
+    get_screen_size, responsive_font_size,
+    FONT, FONT_MONO, FONT_SCALE,
 )
 import ui.style as s
 
@@ -31,10 +33,54 @@ def clear_widget(w: tk.Widget) -> None:
 
 
 def embed_figure(parent: tk.Widget, fig: Figure) -> None:
+    """将 matplotlib Figure 嵌入可滚动的容器中。"""
     clear_widget(parent)
-    canvas = FigureCanvasTkAgg(fig, master=parent)
-    canvas.draw()
-    canvas.get_tk_widget().pack(fill="both", expand=True)
+    t = get_theme()
+
+    # 外层 Canvas + 滚动条（支持大图浏览）
+    outer = tk.Canvas(parent, bg=t.BG, highlightthickness=0, bd=0)
+    vsb = ttk.Scrollbar(parent, orient="vertical", command=outer.yview)
+    hsb = ttk.Scrollbar(parent, orient="horizontal", command=outer.xview)
+    outer.configure(yscrollcommand=vsb.set, xscrollcommand=hsb.set)
+
+    inner = ttk.Frame(outer)
+    inner_id = outer.create_window((0, 0), window=inner, anchor="nw")
+
+    mpl_canvas = FigureCanvasTkAgg(fig, master=inner)
+    mpl_canvas.draw()
+    mpl_canvas.get_tk_widget().pack(fill="both", expand=True)
+
+    def _on_inner_conf(_event):
+        outer.configure(scrollregion=outer.bbox("all"))
+
+    def _on_outer_conf(event):
+        # 让 inner frame 填充 Canvas 宽度
+        outer.itemconfig(inner_id, width=event.width)
+
+    inner.bind("<Configure>", _on_inner_conf)
+    outer.bind("<Configure>", _on_outer_conf)
+
+    # 按需显示滚动条
+    def _check_scroll(_event=None):
+        bbox = outer.bbox("all")
+        if bbox:
+            need_v = bbox[3] > outer.winfo_height() + 5
+            need_h = bbox[2] > outer.winfo_width() + 5
+            if need_v:
+                vsb.pack(side="right", fill="y")
+            else:
+                vsb.pack_forget()
+            if need_h:
+                hsb.pack(side="bottom", fill="x")
+            else:
+                hsb.pack_forget()
+        # 延迟再检查一次（matplotlib 渲染可能异步）
+        outer.after(200, _check_scroll)
+
+    inner.bind("<Configure>", lambda e: (_on_inner_conf(e), _check_scroll(e)), add=True)
+
+    outer.pack(side="left", fill="both", expand=True)
+    outer.after(300, _check_scroll)
 
 
 def _apply_text_theme(st: scrolledtext.ScrolledText, t) -> None:
@@ -52,7 +98,9 @@ def _apply_text_theme(st: scrolledtext.ScrolledText, t) -> None:
 def make_labeled_text(parent: tk.Widget, label: str) -> scrolledtext.ScrolledText:
     """创建一个带标题的 ScrolledText 面板，自动跟随主题。"""
     t = get_theme()
-    lbl = ttk.Label(parent, text=label, font=(FONT, 9), foreground=t.MUTED)
+    lbl = ttk.Label(parent, text=label,
+                    font=(FONT, responsive_font_size(FONT_SCALE["footnote"])),
+                    foreground=t.MUTED)
     lbl.pack(anchor="w", pady=(6, 2))
     st = scrolledtext.ScrolledText(parent, wrap="word")
     st.pack(fill="both", expand=True, pady=(0, 4))
@@ -69,7 +117,8 @@ def _themed_text(parent: tk.Widget, **kwargs) -> tk.Text:
     """创建一个跟随主题的 tk.Text。"""
     t = get_theme()
     defaults = dict(
-        font=(FONT, 10), bg=t.ROW_ALT, fg=t.TEXT,
+        font=(FONT, responsive_font_size(FONT_SCALE["body"])),
+        bg=t.ROW_ALT, fg=t.TEXT,
         relief="flat", padx=10, pady=8, wrap="word",
     )
     defaults.update(kwargs)
@@ -124,6 +173,118 @@ def _dep_status_msg(lang: str | None) -> str:
 
 
 # --------------------------------------------------------------------------- #
+# --------------------------------------------------------------------------- #
+# 依存句法树卡片（可折叠 + 可缩放）
+# --------------------------------------------------------------------------- #
+
+
+class _SentenceCard:
+    """单句依存树的折叠卡片。
+
+    折叠时只显示标题栏（句子编号 + 词数），展开后内嵌 matplotlib 树图
+    并附带 NavigationToolbar2Tk 缩放工具栏。
+    """
+
+    def __init__(self, parent: tk.Widget, sent_index: int, sent_deps: list,
+                 dark_mode: bool = False):
+        self._sent_idx = sent_index
+        self._deps = sent_deps
+        self._dark = dark_mode
+        self._expanded = False
+        self._fig = None
+        self._canvas = None
+
+        n_words = len(sent_deps)
+        self.frame = ttk.LabelFrame(
+            parent,
+            text=f"  S{sent_index + 1}  ·  {n_words} 词",
+            style="Card.TLabelframe",
+        )
+        self.frame.pack(fill="x", padx=6, pady=3)
+
+        # 标题栏（点击切换）
+        hdr = ttk.Frame(self.frame)
+        hdr.pack(fill="x", padx=6, pady=(4, 2))
+
+        self._toggle_btn = ttk.Button(hdr, text="▶", width=3,
+                                       command=self.toggle)
+        self._toggle_btn.pack(side="left")
+
+        root_word = _find_root_word(sent_deps)
+        ttk.Label(hdr, text=f"ROOT: {root_word}",
+                  font=(FONT, responsive_font_size(FONT_SCALE["footnote"]))).pack(
+            side="left", padx=8)
+
+        # 内容区（初始隐藏）
+        self._content = ttk.Frame(self.frame)
+
+    def toggle(self) -> None:
+        if self._expanded:
+            self._collapse()
+        else:
+            self._expand()
+
+    def _expand(self) -> None:
+        self._content.pack(fill="both", expand=True, padx=4, pady=(2, 6))
+        self._toggle_btn.config(text="▼")
+        self._expanded = True
+        if self._fig is None:
+            self.frame.after(50, self._draw_tree)
+
+    def _collapse(self) -> None:
+        self._content.pack_forget()
+        self._toggle_btn.config(text="▶")
+        self._expanded = False
+
+    def _draw_tree(self) -> None:
+        from viz.plots import make_dependency_graph
+
+        clear_widget(self._content)
+        t = get_theme()
+        dark = t.name == "dark"
+
+        self._fig = make_dependency_graph(
+            self._deps,
+            title=f"S{self._sent_idx + 1}",
+            dark_mode=dark,
+            sentence_index=0,
+        )
+        self._canvas = FigureCanvasTkAgg(self._fig, master=self._content)
+        self._canvas.draw()
+        self._canvas.get_tk_widget().pack(fill="both", expand=True)
+
+        # 缩放工具栏
+        toolbar = NavigationToolbar2Tk(self._canvas, self._content)
+        toolbar.update()
+        toolbar.pack(fill="x")
+
+    def update_theme(self, dark_mode: bool) -> None:
+        """主题切换时重新绘制树图。"""
+        if self._expanded and self._fig is not None:
+            from viz.plots import make_dependency_graph
+            clear_widget(self._content)
+            self._fig = make_dependency_graph(
+                self._deps,
+                title=f"S{self._sent_idx + 1}",
+                dark_mode=dark_mode,
+                sentence_index=0,
+            )
+            self._canvas = FigureCanvasTkAgg(self._fig, master=self._content)
+            self._canvas.draw()
+            self._canvas.get_tk_widget().pack(fill="both", expand=True)
+            toolbar = NavigationToolbar2Tk(self._canvas, self._content)
+            toolbar.update()
+            toolbar.pack(fill="x")
+
+
+def _find_root_word(sent_deps: list) -> str:
+    for d in sent_deps:
+        if d.get("dep") == "ROOT":
+            return d.get("text", "?")
+    return "?"
+
+
+# --------------------------------------------------------------------------- #
 # 基础分析
 # --------------------------------------------------------------------------- #
 
@@ -138,10 +299,11 @@ class BasicTab(ttk.Frame):
         ttk.Button(ctrl, text="▶ 运行基础分析", style="Accent.TButton",
                    command=self.run).pack(side="left")
 
-        # 摘要卡片
+        # 摘要卡片（紧凑模式下减少高度）
         card = ttk.LabelFrame(self, text="📋 统计摘要", style="Card.TLabelframe")
         card.pack(fill="x", padx=10, pady=(2, 4))
-        self.summary = _themed_text(card, height=7)
+        summary_h = 5 if is_compact_mode() else 7
+        self.summary = _themed_text(card, height=summary_h)
         self.summary.pack(fill="x", padx=2, pady=2)
 
         # 分词 + 词频 双栏
@@ -247,7 +409,45 @@ class SyntaxTab(ttk.Frame):
 
         self.ner_text = make_labeled_text(self.ner_tab, "命名实体  —  实体 / 类型")
         self.kw_text = make_labeled_text(self.kw_tab, "关键词  —  词语 / 权重")
-        self.dep_text = make_labeled_text(self.dep_tab, "依存关系  —  词 / 词性 / 关系 → 中心词")
+
+        # ── 依存句法：可折叠句子卡片 ──
+        dep_ctrl = ttk.Frame(self.dep_tab)
+        dep_ctrl.pack(fill="x", padx=8, pady=(6, 2))
+        ttk.Button(dep_ctrl, text="展开全部", command=self._expand_all_cards).pack(
+            side="left", padx=(0, 4))
+        ttk.Button(dep_ctrl, text="折叠全部", command=self._collapse_all_cards).pack(
+            side="left")
+
+        # 可滚动卡片容器
+        self._dep_canvas = tk.Canvas(self.dep_tab, highlightthickness=0, bd=0)
+        dep_sb = ttk.Scrollbar(self.dep_tab, orient="vertical",
+                                command=self._dep_canvas.yview)
+        self._dep_canvas.configure(yscrollcommand=dep_sb.set)
+
+        self._dep_cards_frame = ttk.Frame(self._dep_canvas)
+        self._dep_cards_id = self._dep_canvas.create_window(
+            (0, 0), window=self._dep_cards_frame, anchor="nw")
+
+        self._dep_cards_frame.bind("<Configure>",
+            lambda _e: self._dep_canvas.configure(
+                scrollregion=self._dep_canvas.bbox("all")))
+        self._dep_canvas.bind("<Configure>",
+            lambda e: self._dep_canvas.itemconfig(
+                self._dep_cards_id, width=e.width))
+
+        # 鼠标滚轮滚动
+        def _on_mousewheel(event):
+            self._dep_canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
+        self._dep_canvas.bind("<Enter>",
+            lambda _e: self._dep_canvas.bind_all("<MouseWheel>", _on_mousewheel))
+        self._dep_canvas.bind("<Leave>",
+            lambda _e: self._dep_canvas.unbind_all("<MouseWheel>"))
+
+        self._dep_canvas.pack(side="left", fill="both", expand=True)
+        dep_sb.pack(side="right", fill="y")
+
+        self._dep_cards: list[_SentenceCard] = []
+
         self.sent_text = make_labeled_text(self.sent_tab, "情感得分  —  -1 负向  ~  1 正向")
         self.api_text = make_labeled_text(self.api_tab, "AI 返回结果")
 
@@ -297,16 +497,32 @@ class SyntaxTab(ttk.Frame):
         for w, weight in res.keywords:
             self.kw_text.insert("end", f"{w:<24s}{weight:.4f}\n")
 
-        # 依存句法
-        self.dep_text.delete("1.0", "end")
-        if not res.dependencies:
-            self.dep_text.insert("end", _dep_status_msg(lang))
-        else:
+        # 依存句法 — 可折叠句子卡片
+        clear_widget(self._dep_cards_frame)
+        self._dep_cards.clear()
+        # 按 sent_id 分组
+        sentences: list[list[dict]] = []
+        if res.dependencies:
+            cur_sid, cur = None, []
             for d in res.dependencies:
-                self.dep_text.insert(
-                    "end",
-                    f"{d['text']:<16s}{d['pos']:<8s}{d['dep']:<8s}→ {d['head_text']}\n",
-                )
+                sid = d.get("sent_id", 0)
+                if sid != cur_sid:
+                    if cur:
+                        sentences.append(cur)
+                    cur, cur_sid = [d], sid
+                else:
+                    cur.append(d)
+            if cur:
+                sentences.append(cur)
+
+            for si, sent_deps in enumerate(sentences):
+                card = _SentenceCard(self._dep_cards_frame, si, sent_deps)
+                self._dep_cards.append(card)
+        else:
+            tk.Label(self._dep_cards_frame,
+                     text=_dep_status_msg(lang),
+                     font=(FONT, responsive_font_size(FONT_SCALE["body"]))).pack(
+                padx=20, pady=20)
 
         # 情感
         self.sent_text.delete("1.0", "end")
@@ -339,6 +555,29 @@ class SyntaxTab(ttk.Frame):
         self.app.set_status(
             f"句法分析完成 — {len(res.ner)} 实体, {len(res.keywords)} 关键词"
         )
+
+        # 通知主窗口标注句子
+        try:
+            self.app.annotate_sentences(len(sentences))
+        except Exception:
+            pass
+
+    def _expand_all_cards(self) -> None:
+        for c in self._dep_cards:
+            if not c._expanded:
+                c._expand()
+
+    def _collapse_all_cards(self) -> None:
+        for c in self._dep_cards:
+            if c._expanded:
+                c._collapse()
+
+    def expand_sentence(self, index: int) -> None:
+        """公开方法：展开指定句子编号的卡片。"""
+        if 0 <= index < len(self._dep_cards):
+            card = self._dep_cards[index]
+            if not card._expanded:
+                card._expand()
 
     def run_api(self) -> None:
         text = self.app.get_text()
@@ -377,7 +616,8 @@ class CompareTab(ttk.Frame):
         ttk.Label(
             ctrl,
             text="  |  中英对齐：分别粘贴中英文 → 点击「对齐」",
-            font=(FONT, 9), foreground=s.MUTED,
+            font=(FONT, responsive_font_size(FONT_SCALE["footnote"])),
+            foreground=s.MUTED,
         ).pack(side="left", padx=8)
 
         # 双输入框
@@ -388,11 +628,15 @@ class CompareTab(ttk.Frame):
         pane.add(left)
         pane.add(right)
 
-        ttk.Label(left, text="中文原文", font=(FONT, 9), foreground=s.MUTED).pack(anchor="w")
+        ttk.Label(left, text="中文原文",
+                  font=(FONT, responsive_font_size(FONT_SCALE["footnote"])),
+                  foreground=s.MUTED).pack(anchor="w")
         self.zh_box = scrolledtext.ScrolledText(left, wrap="word")
         self.zh_box.pack(fill="both", expand=True)
 
-        ttk.Label(right, text="英文原文", font=(FONT, 9), foreground=s.MUTED).pack(anchor="w")
+        ttk.Label(right, text="英文原文",
+                  font=(FONT, responsive_font_size(FONT_SCALE["footnote"])),
+                  foreground=s.MUTED).pack(anchor="w")
         self.en_box = scrolledtext.ScrolledText(right, wrap="word")
         self.en_box.pack(fill="both", expand=True)
 
@@ -471,7 +715,8 @@ class HistoryTab(ttk.Frame):
         ttk.Label(
             ctrl,
             text="双击某条记录可将其文本载入主输入框",
-            font=(FONT, 9), foreground=s.MUTED,
+            font=(FONT, responsive_font_size(FONT_SCALE["footnote"])),
+            foreground=s.MUTED,
         ).pack(side="left", padx=12)
 
         # 列表
@@ -499,8 +744,9 @@ class HistoryTab(ttk.Frame):
 
         self.tree.bind("<Double-1>", self._on_double_click)
 
-        # 详情面板
-        self.detail = _themed_text(self, height=8)
+        # 详情面板（紧凑模式下减少高度）
+        detail_h = 5 if is_compact_mode() else 8
+        self.detail = _themed_text(self, height=detail_h)
         self.detail.pack(fill="x", padx=10, pady=(4, 10))
 
         self._entries: list[history.HistoryEntry] = []
@@ -600,6 +846,8 @@ class VizTab(ttk.Frame):
         self.canvas_holder.pack(fill="both", expand=True, padx=10, pady=4)
         self._basic: Optional[analyzer.BasicResult] = None
         self._syntax: Optional[analyzer.SyntaxResult] = None
+        # 分析结果缓存：相同 (text, lang) 不重复分析（避免连续点击图表按钮时重复跑 spaCy）
+        self._cache_key: Optional[tuple] = None
 
     def _ensure_data(self) -> bool:
         text = self.app.get_text()
@@ -607,9 +855,15 @@ class VizTab(ttk.Frame):
             messagebox.showinfo("提示", "请先输入待分析文本。")
             return False
         lang = self.app.get_lang()
+        cache_key = (text, lang)
+        if (self._cache_key == cache_key
+                and self._basic is not None
+                and self._syntax is not None):
+            return True
         try:
             self._basic = analyzer.analyze_basic(text, lang)
             self._syntax = analyzer.analyze_syntax(text, lang)
+            self._cache_key = cache_key
         except Exception as e:
             messagebox.showerror("错误", f"分析失败：{e}")
             return False
@@ -668,7 +922,8 @@ class _InputRow:
         self.on_change = on_change
         self._text = ""        # 存储已加载的文本
 
-        self.frame = ttk.LabelFrame(parent, text=f"{icon} {label}")
+        self.frame = ttk.LabelFrame(parent, text=f"{icon} {label}",
+                                    style="Card.TLabelframe")
         self.frame.pack(fill="x", padx=10, pady=(3, 2))
 
         inner = ttk.Frame(self.frame)
@@ -681,7 +936,9 @@ class _InputRow:
         self.paste_btn.pack(side="left", padx=(0, 8))
 
         self.status_label = ttk.Label(
-            inner, text="尚未加载文本", font=(FONT, 9), foreground=s.MUTED,
+            inner, text="尚未加载文本",
+            font=(FONT, responsive_font_size(FONT_SCALE["footnote"])),
+            foreground=s.MUTED,
         )
         self.status_label.pack(side="left")
 
@@ -709,14 +966,19 @@ class _InputRow:
 
     # ── 粘贴文本 ──
     def _paste_text(self) -> None:
-        """弹出粘贴窗口。"""
+        """弹出粘贴窗口。按 Enter 确认，Shift+Enter 换行。"""
         popup = tk.Toplevel(self.frame)
         popup.title(f"粘贴文本 — {self.label}")
-        popup.geometry("720x400")
+        # 响应式尺寸
+        _, sh = get_screen_size()
+        pw, ph = (580, 340) if sh <= 768 else (720, 420)
+        popup.geometry(f"{pw}x{ph}")
+        popup.minsize(480, 280)
         popup.transient(self.frame)
         popup.grab_set()
 
-        box = scrolledtext.ScrolledText(popup, wrap="word", font=(FONT, 11))
+        box = scrolledtext.ScrolledText(popup, wrap="word",
+             font=(FONT, responsive_font_size(FONT_SCALE["headline"])))
         box.pack(fill="both", expand=True, padx=8, pady=8)
         # 预填已有文本
         if self._text:
@@ -725,7 +987,14 @@ class _InputRow:
         btn_frame = ttk.Frame(popup)
         btn_frame.pack(fill="x", padx=8, pady=(0, 8))
 
-        def _confirm():
+        # 提示文字
+        ttk.Label(
+            btn_frame, text="按 Enter 确认  ·  Shift+Enter 换行",
+            font=(FONT, responsive_font_size(FONT_SCALE["caption"])),
+            foreground=s.MUTED,
+        ).pack(side="left", padx=(0, 8))
+
+        def _confirm(event=None):
             text = box.get("1.0", "end-1c").strip()
             self._text = text
             count = len(text.replace(" ", "").replace("\n", "").replace("\r", ""))
@@ -739,6 +1008,15 @@ class _InputRow:
             if self.on_change:
                 self.on_change()
             popup.destroy()
+
+        def _shift_return(event):
+            """Shift+Enter 插入换行，不提交。"""
+            box.insert("insert", "\n")
+            return "break"
+
+        # 绑定键盘快捷键
+        box.bind("<Return>", _confirm)
+        box.bind("<Shift-Return>", _shift_return)
 
         ttk.Button(btn_frame, text="✅ 确认", command=_confirm).pack(side="right", padx=4)
         ttk.Button(btn_frame, text="取消", command=popup.destroy).pack(side="right")
@@ -797,14 +1075,18 @@ class _ControlRow(_InputRow):
 
 def _open_paste_popup(parent: tk.Widget, title: str, initial_text: str,
                       callback: "callable") -> None:
-    """打开粘贴文本的模态弹窗。"""
+    """打开粘贴文本的模态弹窗。按 Enter 确认，Shift+Enter 换行。"""
     popup = tk.Toplevel(parent)
     popup.title(title)
-    popup.geometry("700x380")
+    _, sh = get_screen_size()
+    pw, ph = (560, 320) if sh <= 768 else (700, 400)
+    popup.geometry(f"{pw}x{ph}")
+    popup.minsize(460, 260)
     popup.transient(parent)
     popup.grab_set()
 
-    box = scrolledtext.ScrolledText(popup, wrap="word", font=(FONT, 11))
+    box = scrolledtext.ScrolledText(popup, wrap="word",
+         font=(FONT, responsive_font_size(FONT_SCALE["headline"])))
     box.pack(fill="both", expand=True, padx=8, pady=8)
     if initial_text:
         box.insert("1.0", initial_text)
@@ -812,9 +1094,22 @@ def _open_paste_popup(parent: tk.Widget, title: str, initial_text: str,
     btn_frame = ttk.Frame(popup)
     btn_frame.pack(fill="x", padx=8, pady=(0, 8))
 
-    def _done():
+    ttk.Label(
+        btn_frame, text="按 Enter 确认  ·  Shift+Enter 换行",
+        font=(FONT, responsive_font_size(FONT_SCALE["caption"])),
+        foreground=s.MUTED,
+    ).pack(side="left", padx=(0, 8))
+
+    def _done(event=None):
         callback(box.get("1.0", "end-1c").strip())
         popup.destroy()
+
+    def _shift_return(event):
+        box.insert("insert", "\n")
+        return "break"
+
+    box.bind("<Return>", _done)
+    box.bind("<Shift-Return>", _shift_return)
 
     ttk.Button(btn_frame, text="✅ 确认", command=_done).pack(side="right", padx=4)
     ttk.Button(btn_frame, text="取消", command=popup.destroy).pack(side="right")
@@ -845,7 +1140,8 @@ class FingerprintTab(ttk.Frame):
         ttk.Label(
             ctrl,
             text="  |  加载文件或粘贴文本，支持 txt / docx / pdf / html / rtf 等格式",
-            font=(FONT, 9), foreground=s.MUTED,
+            font=(FONT, responsive_font_size(FONT_SCALE["footnote"])),
+            foreground=s.MUTED,
         ).pack(side="left", padx=8)
 
         # ── 可疑文本 A ──
@@ -873,23 +1169,28 @@ class FingerprintTab(ttk.Frame):
         ttk.Label(
             add_frame,
             text="  添加同性别、同类型、同时期的其他作家作品作为对照",
-            font=(FONT, 8), foreground=s.MUTED,
+            font=(FONT, responsive_font_size(FONT_SCALE["caption"])),
+            foreground=s.MUTED,
         ).pack(side="left", padx=6)
 
         # 默认添加一个对照
         self._add_control()
 
-        # ── 图表区域 ──
-        self.chart_frame = ttk.LabelFrame(self, text="📊 相似度对比图")
-        self.chart_frame.pack(fill="x", padx=10, pady=(6, 2))
+        # ── 图表区域 ──（Apple 卡片风格）
+        self.chart_frame = ttk.LabelFrame(self, text="📊 相似度对比图",
+                                          style="Card.TLabelframe")
+        self.chart_frame.pack(fill="both", expand=True, padx=10, pady=(6, 2))
         self.chart_holder = ttk.Frame(self.chart_frame)
         self.chart_holder.pack(fill="both", expand=True, padx=4, pady=4)
 
         # ── 详细报告（主区域，expand）──
-        self.report_frame = ttk.LabelFrame(self, text="📋 详细报告")
+        self.report_frame = ttk.LabelFrame(self, text="📋 详细报告",
+                                           style="Card.TLabelframe")
         self.report_frame.pack(fill="both", expand=True, padx=10, pady=(4, 10))
         self.results_text = scrolledtext.ScrolledText(
-            self.report_frame, wrap="word", font=(FONT, 10),
+            self.report_frame, wrap="word",
+            font=(FONT, responsive_font_size(FONT_SCALE["footnote"])
+                  if is_compact_mode() else responsive_font_size(FONT_SCALE["body"])),
         )
         self.results_text.pack(fill="both", expand=True, padx=4, pady=4)
         # 初始提示
