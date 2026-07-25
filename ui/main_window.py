@@ -12,8 +12,14 @@ from ui.style import (
     toggle_theme,
     register_theme_callback,
     enable_dpi_awareness,
+    get_responsive_window_size,
+    get_responsive_min_size,
+    is_compact_mode,
+    responsive_padding,
+    responsive_font_size,
     FONT,
     FONT_MONO,
+    FONT_SCALE,
 )
 from ui.tabs import BasicTab, SyntaxTab, CompareTab, VizTab, HistoryTab, FingerprintTab
 
@@ -24,9 +30,15 @@ class App:
     def __init__(self, root: tk.Tk):
         self.root = root
         root.title("汉英 NLP 分析工具")
-        root.geometry("1280x820")
-        root.minsize(1024, 680)
+
+        # 响应式窗口尺寸
+        w, h = get_responsive_window_size()
+        min_w, min_h = get_responsive_min_size()
+        root.geometry(f"{w}x{h}")
+        root.minsize(min_w, min_h)
         root.configure(bg=s.BG)
+
+        self._compact = is_compact_mode()
 
         apply_style(root)
         self._theme_widgets: list[tk.Widget] = []
@@ -54,7 +66,9 @@ class App:
         self._shadow = shadow  # 跟踪用于主题切换
 
         inner = tk.Frame(bar, bg=t.CARD)
-        inner.pack(fill="x", padx=20, pady=(14, 6))
+        header_padx = responsive_padding(24)
+        header_pady = (responsive_padding(14), responsive_padding(8))
+        inner.pack(fill="x", padx=header_padx, pady=header_pady)
 
         # 左侧：标题与副标题
         left = tk.Frame(inner, bg=t.CARD)
@@ -62,21 +76,27 @@ class App:
 
         tk.Label(
             left, text="📝 汉英 NLP 分析工具",
-            font=(FONT, 15, "bold"),
+            font=(FONT, responsive_font_size(FONT_SCALE["title"]), "bold")
+            if not self._compact else (FONT, responsive_font_size(FONT_SCALE["title2"]), "bold"),
             bg=t.CARD, fg=t.TEXT,
         ).pack(side="left")
 
-        tk.Label(
+        self.subtitle_label = tk.Label(
             left, text="  汉语 · 英语 · 本地优先 · 可选 AI",
-            font=(FONT, 9), bg=t.CARD, fg=t.MUTED,
-        ).pack(side="left", padx=(6, 0))
+            font=(FONT, responsive_font_size(FONT_SCALE["footnote"])),
+            bg=t.CARD, fg=t.MUTED,
+        )
+        if not self._compact:
+            self.subtitle_label.pack(side="left", padx=(6, 0))
+        # 紧凑模式: 不显示副标题
 
         # 右侧：后端状态 + 主题切换
         right = tk.Frame(inner, bg=t.CARD)
         right.pack(side="right")
 
         self.backend_indicator = tk.Label(
-            right, text="", font=(FONT, 9), bg=t.CARD, fg=t.SUCCESS,
+            right, text="", font=(FONT, responsive_font_size(FONT_SCALE["footnote"])),
+            bg=t.CARD, fg=t.SUCCESS,
         )
         self.backend_indicator.pack(side="left", padx=(0, 10))
         self._update_backend_indicator()
@@ -85,7 +105,7 @@ class App:
         self.theme_btn = tk.Button(
             right,
             text="☾ 深色模式",
-            font=(FONT, 9),
+            font=(FONT, responsive_font_size(FONT_SCALE["footnote"])),
             bg=t.ACCENT_SOFT, fg=t.ACCENT,
             relief="flat", padx=12, pady=4,
             activebackground=t.ACCENT, activeforeground="#ffffff",
@@ -152,13 +172,14 @@ class App:
 
     def _rebuild_menu_colors(self) -> None:
         t = get_theme()
+        menu_font = (FONT, responsive_font_size(FONT_SCALE["body"]))
         menubar = tk.Menu(self.root, bg=t.CARD, fg=t.TEXT,
                           activebackground=t.ACCENT_SOFT, activeforeground=t.TEXT,
-                          borderwidth=0, font=(FONT, 10))
+                          borderwidth=0, font=menu_font)
 
         mfile = tk.Menu(menubar, tearoff=0, bg=t.CARD, fg=t.TEXT,
                         activebackground=t.ACCENT_SOFT, activeforeground=t.TEXT,
-                        font=(FONT, 10))
+                        font=menu_font)
         mfile.add_command(label="📂 打开文件…", command=self.open_file, accelerator="Ctrl+O")
         mfile.add_command(label="💾 保存结果…", command=self.save_file, accelerator="Ctrl+S")
         mfile.add_separator()
@@ -167,7 +188,7 @@ class App:
 
         mset = tk.Menu(menubar, tearoff=0, bg=t.CARD, fg=t.TEXT,
                        activebackground=t.ACCENT_SOFT, activeforeground=t.TEXT,
-                       font=(FONT, 10))
+                       font=menu_font)
         mset.add_command(label="🔌 API 配置…", command=self.open_api_settings)
         mset.add_command(label="📋 检查后端状态", command=self.show_backend_status)
         mset.add_separator()
@@ -177,7 +198,7 @@ class App:
 
         mhelp = tk.Menu(menubar, tearoff=0, bg=t.CARD, fg=t.TEXT,
                         activebackground=t.ACCENT_SOFT, activeforeground=t.TEXT,
-                        font=(FONT, 10))
+                        font=menu_font)
         mhelp.add_command(label="关于", command=self.about)
         menubar.add_cascade(label="帮助", menu=mhelp)
 
@@ -190,12 +211,17 @@ class App:
     # ----------------------------------------------------------------- #
 
     def _build_body(self) -> None:
+        body_padx = responsive_padding(12)
+        body_pady = (responsive_padding(8), responsive_padding(4))
         body = ttk.Frame(self.root)
-        body.pack(fill="both", expand=True, padx=12, pady=(8, 4))
+        body.pack(fill="both", expand=True, padx=body_padx, pady=body_pady)
+
+        # ── 左右分栏 PanedWindow（用户可拖动分隔条）──
+        pane = ttk.PanedWindow(body, orient="horizontal")
+        pane.pack(fill="both", expand=True)
 
         # 左面板：输入
-        left = ttk.LabelFrame(body, text="📥 输入文本", style="Card.TLabelframe")
-        left.pack(side="left", fill="both", expand=True, padx=(0, 6))
+        left = ttk.LabelFrame(pane, text="📥 输入文本", style="Card.TLabelframe")
 
         ctrl = ttk.Frame(left)
         ctrl.pack(fill="x", padx=10, pady=(10, 2))
@@ -213,7 +239,7 @@ class App:
 
         t = get_theme()
         self.text = scrolledtext.ScrolledText(
-            left, wrap="word", font=(FONT_MONO, 11),
+            left, wrap="word", font=(FONT_MONO, responsive_font_size(FONT_SCALE["headline"])),
             bg=t.INPUT_BG, fg=t.TEXT,
             highlightthickness=1, highlightbackground=t.BORDER,
             highlightcolor=t.ACCENT,
@@ -246,8 +272,11 @@ class App:
         self.text.bind("<FocusOut>", self._on_text_focus_out)
 
         # 右面板：标签页
-        right = ttk.Frame(body)
-        right.pack(side="left", fill="both", expand=True, padx=(6, 0))
+        right = ttk.Frame(pane)
+
+        # 添加到 PanedWindow（比例可调）
+        pane.add(left, weight=42)   # 左面板 42% 初始宽度
+        pane.add(right, weight=58)  # 右面板 58% 初始宽度
 
         nb = ttk.Notebook(right)
         nb.pack(fill="both", expand=True)
@@ -259,12 +288,21 @@ class App:
         self.history_tab = HistoryTab(nb, self)
         self.fingerprint_tab = FingerprintTab(nb, self)
 
-        nb.add(self.basic_tab, text="  📊 基础分析  ")
-        nb.add(self.syntax_tab, text="  🔍 句法/语义  ")
-        nb.add(self.compare_tab, text="  ⚖ 对比分析  ")
-        nb.add(self.viz_tab, text="  📈 可视化  ")
-        nb.add(self.history_tab, text="  📜 历史记录  ")
-        nb.add(self.fingerprint_tab, text="  🔬 语言指纹  ")
+        # ── Notebook 标签：紧凑模式下缩短文字 ──
+        if self._compact:
+            nb.add(self.basic_tab, text="  📊 基础  ")
+            nb.add(self.syntax_tab, text="  🔍 句法  ")
+            nb.add(self.compare_tab, text="  ⚖ 对比  ")
+            nb.add(self.viz_tab, text="  📈 可视化  ")
+            nb.add(self.history_tab, text="  📜 历史  ")
+            nb.add(self.fingerprint_tab, text="  🔬 指纹  ")
+        else:
+            nb.add(self.basic_tab, text="  📊 基础分析  ")
+            nb.add(self.syntax_tab, text="  🔍 句法/语义  ")
+            nb.add(self.compare_tab, text="  ⚖ 对比分析  ")
+            nb.add(self.viz_tab, text="  📈 可视化  ")
+            nb.add(self.history_tab, text="  📜 历史记录  ")
+            nb.add(self.fingerprint_tab, text="  🔬 语言指纹  ")
 
     def _on_text_focus_in(self, event) -> None:
         if self._placeholder_shown:
@@ -288,8 +326,9 @@ class App:
         self._status = tk.Label(
             self.root,
             text="就绪  —  输入文本后点击分析按钮开始",
-            font=(FONT, 9), bg=t.ROW_ALT, fg=t.MUTED,
-            anchor="w", padx=14, pady=5,
+            font=(FONT, responsive_font_size(FONT_SCALE["footnote"])),
+            bg=t.ROW_ALT, fg=t.MUTED,
+            anchor="w", padx=16, pady=6,
         )
         self._status.pack(fill="x", side="bottom")
         self._theme_widgets.append(self._status)
@@ -327,13 +366,124 @@ class App:
     # ----------------------------------------------------------------- #
 
     def get_text(self) -> str:
+        """获取输入文本，自动过滤掉句子序号标记。
+
+        标记格式为 ``\\x00[序号]\\x00``（用 NULL 字符包裹），
+        插入时带 ``elide=True`` 的 tag 让其不可见、不可选中，
+        但 ``get()`` 仍会返回原始字符，因此这里用正则清除。
+        """
         if self._placeholder_shown:
             return ""
-        return self.text.get("1.0", "end-1c")
+        raw = self.text.get("1.0", "end-1c")
+        # 过滤句子序号标记（\x00 包裹的 [n]）
+        import re as _re
+        return _re.sub(r"\x00\[\d+\]\x00", "", raw)
 
     def get_lang(self):
         m = {"自动": None, "中文": "zh", "英文": "en", "中英混合": "mixed"}
         return m.get(self.lang_var.get())
+
+    # 句子标记用的 NULL 字符 sentinel（不会出现在正常文本中）
+    _SENT_MARK_SENTINEL = "\x00"
+    _SENT_MARK_RE = None  # 延迟编译
+
+    def annotate_sentences(self, count: int) -> None:
+        """分析完成后在句末插入不可见、不可选中的上标序号标记 ``[1] [2]``。
+
+        实现要点：
+        1. 标记用 ``\\x00[序号]\\x00`` 格式，用 NULL 字符包裹
+           （正常文本不会包含 NULL，避免与正文冲突）。
+        2. 标记带 ``elide=True`` 的 tag，Tk 会隐藏这些字符：
+           - 视觉上不显示（不污染文本外观）
+           - 用户无法用鼠标选中（select 不会包含 elide 文本）
+           - 复制时不会包含（Tk 的 elide 文本默认不参与复制）
+        3. ``get_text()`` 仍会返回原始字符（包括 NULL 标记），所以那里用正则过滤。
+        4. 点击标记区域 → 通过 ``index @x,y`` 定位 → 向后搜索 ``\\x00[\\d+]\\x00``
+           提取序号 → 展开对应句子卡片。
+        5. 用户修改文本（``<<Modified>>`` 事件）→ 自动清除所有标记。
+        """
+        if self._placeholder_shown or count <= 0:
+            return
+
+        # 先清除旧标记（真正删除字符，而非只删 tag）
+        self.clear_sentence_marks()
+
+        content = self.text.get("1.0", "end-1c")
+
+        # 配置 elide tag（隐藏文本，Tk 8.5+ 支持）
+        self.text.tag_configure(
+            "sent_marker",
+            elide=True,
+            foreground="#007AFF",
+            background="#e8f0ff",
+            font=(FONT, responsive_font_size(FONT_SCALE["footnote"]) - 1, "bold"),
+        )
+        # 配置上标可见 tag（仅用于显示，实际仍用 elide 隐藏）
+        # 这里选择完全 elide 隐藏，保持文本干净
+
+        # 在句末标点后插入 [1] [2] ...
+        import re
+        sent_ends = list(re.finditer(r"[。！？!?\.](?=\s|$|\n)", content))
+        n_found = min(len(sent_ends), count)
+
+        # 从后往前插入，避免偏移
+        for i in range(n_found - 1, -1, -1):
+            end = sent_ends[i].end()
+            # 用 NULL 包裹，便于过滤和解析
+            marker = f"{self._SENT_MARK_SENTINEL}[{i + 1}]{self._SENT_MARK_SENTINEL}"
+            line_col = self.text.index(f"1.0+{end}c")
+            self.text.insert(line_col, marker, ("sent_marker",))
+
+        # 点击标记区域 → 定位并展开对应句子卡片
+        def _on_click(event):
+            try:
+                idx = self.text.index(f"@{event.x},{event.y}")
+                # 在点击位置附近搜索 NULL 标记
+                start = self.text.index(f"{idx} - 8c")
+                end = self.text.index(f"{idx} + 8c")
+                nearby = self.text.get(start, end)
+                m = re.search(r"\x00\[(\d+)\]\x00", nearby)
+                if m:
+                    si = int(m.group(1)) - 1
+                    self.syntax_tab.expand_sentence(si)
+            except Exception:
+                pass
+
+        self.text.tag_bind("sent_marker", "<Button-1>", _on_click)
+
+        # 监听文本修改：用户编辑后自动清除标记
+        if not getattr(self, "_mark_modified_bound", False):
+            def _on_modified(_event):
+                # <<Modified>> 会在文本变化时触发，清除标记并重置标志
+                # 避免在清除标记的过程中递归触发
+                if self.text.edit_modified() and not getattr(self, "_clearing_marks", False):
+                    self._clearing_marks = True
+                    try:
+                        self.clear_sentence_marks()
+                    finally:
+                        self._clearing_marks = False
+                        self.text.edit_modified(False)
+            self.text.bind("<<Modified>>", _on_modified)
+            self._mark_modified_bound = True
+
+    def clear_sentence_marks(self) -> None:
+        """删除所有句子序号标记（真正从文本中移除字符）。"""
+        import re
+        # 避免递归：标记正在清除中
+        self._clearing_marks = True
+        try:
+            while True:
+                content = self.text.get("1.0", "end-1c")
+                m = re.search(r"\x00\[\d+\]\x00", content)
+                if not m:
+                    break
+                start = self.text.index(f"1.0+{m.start()}c")
+                end = self.text.index(f"1.0+{m.end()}c")
+                self.text.delete(start, end)
+            self.text.tag_delete("sent_marker")
+            self.text.edit_modified(False)
+        finally:
+            self._clearing_marks = False
 
     # ----------------------------------------------------------------- #
     # 菜单动作
@@ -403,27 +553,29 @@ class App:
 
         # 标题
         tk.Label(dlg, text="🔌 API 配置", bg=t.CARD, fg=t.TEXT,
-                 font=(FONT, 13, "bold")).pack(anchor="w", padx=16, pady=(14, 10))
+                 font=(FONT, responsive_font_size(FONT_SCALE["title2"]), "bold")
+                 ).pack(anchor="w", padx=16, pady=(14, 10))
 
         tk.Label(dlg, text="Base URL（OpenAI 兼容）", bg=t.CARD, fg=t.TEXT,
-                 font=(FONT, 10)).pack(anchor="w", padx=16, pady=(0, 0))
-        base = tk.Entry(dlg, width=52, font=(FONT_MONO, 10), relief="solid", borderwidth=1,
+                 font=(FONT, responsive_font_size(FONT_SCALE["body"]))
+                 ).pack(anchor="w", padx=16, pady=(0, 0))
+        base = tk.Entry(dlg, width=52, font=(FONT_MONO, responsive_font_size(FONT_SCALE["body"])),
                         bg=t.INPUT_BG, fg=t.INPUT_FG,
                         highlightthickness=1, highlightcolor=t.ACCENT, highlightbackground=t.BORDER)
         base.insert(0, cfg.get("base_url", "https://api.openai.com/v1"))
         base.pack(padx=16, pady=(3, 0), fill="x")
 
         tk.Label(dlg, text="API Key", bg=t.CARD, fg=t.TEXT,
-                 font=(FONT, 10)).pack(anchor="w", padx=16, pady=(10, 0))
-        key = tk.Entry(dlg, width=52, show="*", font=(FONT_MONO, 10), relief="solid", borderwidth=1,
+                 font=(FONT, responsive_font_size(FONT_SCALE["body"]))).pack(anchor="w", padx=16, pady=(10, 0))
+        key = tk.Entry(dlg, width=52, show="*", font=(FONT_MONO, responsive_font_size(FONT_SCALE["body"])), relief="solid", borderwidth=1,
                        bg=t.INPUT_BG, fg=t.INPUT_FG,
                        highlightthickness=1, highlightcolor=t.ACCENT, highlightbackground=t.BORDER)
         key.insert(0, cfg.get("api_key", ""))
         key.pack(padx=16, pady=(3, 0), fill="x")
 
         tk.Label(dlg, text="模型名称", bg=t.CARD, fg=t.TEXT,
-                 font=(FONT, 10)).pack(anchor="w", padx=16, pady=(10, 0))
-        model = tk.Entry(dlg, width=52, font=(FONT_MONO, 10), relief="solid", borderwidth=1,
+                 font=(FONT, responsive_font_size(FONT_SCALE["body"]))).pack(anchor="w", padx=16, pady=(10, 0))
+        model = tk.Entry(dlg, width=52, font=(FONT_MONO, responsive_font_size(FONT_SCALE["body"])), relief="solid", borderwidth=1,
                          bg=t.INPUT_BG, fg=t.INPUT_FG,
                          highlightthickness=1, highlightcolor=t.ACCENT, highlightbackground=t.BORDER)
         model.insert(0, cfg.get("model", "claude-fable-5"))
@@ -446,7 +598,8 @@ class App:
 
         tk.Button(
             btn_frame, text="取消",
-            bg=t.BUTTON_BG, fg=t.TEXT, font=(FONT, 10),
+            bg=t.BUTTON_BG, fg=t.TEXT,
+            font=(FONT, responsive_font_size(FONT_SCALE["body"])),
             relief="flat", padx=20, pady=7,
             activebackground=t.BUTTON_HOVER,
             command=dlg.destroy,
@@ -454,7 +607,8 @@ class App:
 
         tk.Button(
             btn_frame, text="💾 保存",
-            bg=t.ACCENT, fg="#ffffff", font=(FONT, 10, "bold"),
+            bg=t.ACCENT, fg="#ffffff",
+            font=(FONT, responsive_font_size(FONT_SCALE["body"]), "bold"),
             relief="flat", padx=20, pady=7,
             activebackground=t.ACCENT_HOVER,
             command=save,
@@ -480,7 +634,7 @@ class App:
     def about(self) -> None:
         messagebox.showinfo(
             "关于",
-            "📝 汉英 NLP 分析工具  V1.0\n"
+            "📝 汉英 NLP 分析工具  V1.1\n"
             "Python + Tkinter · 本地与云端混合\n\n"
             "作者：Fragesius\n"
             "联系方式：fragesius@gmail.com\n\n"
@@ -492,82 +646,169 @@ class App:
 
 
 def show_first_run_setup(parent: tk.Tk) -> None:
-    """首次运行向导：引导用户配置 API 密钥。
+    """Apple HIG 风格首次运行向导：引导用户配置 API 密钥。
 
-    用户可选择：
-    - 立即配置 API（打开设置对话框）
-    - 跳过，仅使用本地分析功能
-    - 下次不再提示
+    设计遵循 Apple 原则：Purpose（意图明确）、Agency（用户掌控）、Simplicity（简洁但不简陋）。
     """
     from core._paths import mark_setup_done
-    from ui.style import get_theme as _t
+    from ui.style import get_theme as _t, get_screen_size, is_compact_mode
 
     t = _t()
     dlg = tk.Toplevel(parent)
     dlg.title("欢迎使用")
-    dlg.geometry("560x380")
     dlg.configure(bg=t.CARD)
     dlg.grab_set()
     dlg.transient(parent)
+
+    # ── 响应式尺寸：确保所有内容可见 ──
+    _, sh = get_screen_size()
+    if sh <= 720:
+        dw, dh = 660, 580
+    elif sh <= 768:
+        dw, dh = 740, 640
+    elif sh <= 900:
+        dw, dh = 800, 700
+    elif sh <= 1080:
+        dw, dh = 860, 760
+    else:
+        dw, dh = 920, 820
+    dlg.minsize(560, 480)
+
     # 居中
     dlg.update_idletasks()
     pw, ph = parent.winfo_width(), parent.winfo_height()
     px, py = parent.winfo_x(), parent.winfo_y()
-    dw, dh = 560, 380
     dlg.geometry(f"{dw}x{dh}+{px + (pw - dw) // 2}+{py + (ph - dh) // 2}")
+
+    compact = is_compact_mode()
+    tpad = 24 if not compact else 16          # 水平边距
+    card_vpad = 3 if not compact else 2       # 卡片垂直间距
+    card_ipadx = 12 if not compact else 10    # 卡片内部水平间距
+    card_ipady = 9 if not compact else 7      # 卡片内部垂直间距
 
     skip = tk.BooleanVar(value=False)
 
-    # ── 标题区 ──
+    # ── Canvas + Scrollbar（仅极小屏幕启用滚动）──
+    use_scroll = sh <= 720
+    if use_scroll:
+        canvas = tk.Canvas(dlg, bg=t.CARD, highlightthickness=0, bd=0)
+        scrollbar = ttk.Scrollbar(dlg, orient="vertical", command=canvas.yview)
+        scrollable = tk.Frame(canvas, bg=t.CARD)
+        canvas.create_window((0, 0), window=scrollable, anchor="nw", tags="inner")
+        canvas.configure(yscrollcommand=scrollbar.set)
+
+        def _on_canvas_resize(event):
+            """让内部 frame 始终填满 Canvas 宽度。"""
+            canvas.itemconfig("inner", width=event.width)
+
+        def _on_content_resize(_event):
+            canvas.configure(scrollregion=canvas.bbox("all"))
+            if scrollable.winfo_reqheight() > canvas.winfo_height():
+                scrollbar.pack(side="right", fill="y")
+            else:
+                scrollbar.pack_forget()
+
+        canvas.bind("<Configure>", _on_canvas_resize)
+        scrollable.bind("<Configure>", _on_content_resize)
+        canvas.pack(side="left", fill="both", expand=True)
+    else:
+        scrollable = tk.Frame(dlg, bg=t.CARD)
+        scrollable.pack(fill="both", expand=True)
+
+    # ═══════════════════════════════════════════════════════════════
+    # 标题区 — Apple largeTitle 层级
+    # ═══════════════════════════════════════════════════════════════
+
     tk.Label(
-        dlg, text="📝 欢迎使用汉英 NLP 分析工具",
+        scrollable,
+        text="欢迎使用汉英 NLP 分析工具",
         bg=t.CARD, fg=t.TEXT,
-        font=(FONT, 15, "bold"),
-    ).pack(anchor="w", padx=24, pady=(20, 6))
+        font=(FONT, responsive_font_size(FONT_SCALE["largeTitle"]), "bold"),
+    ).pack(anchor="w", padx=tpad, pady=(tpad, 4))
 
     tk.Label(
-        dlg,
-        text="本地优先 · 离线可用 · 可选 AI 增强",
+        scrollable,
+        text="📝  本地优先 · 离线可用 · 可选 AI 增强",
         bg=t.CARD, fg=t.MUTED,
-        font=(FONT, 10),
-    ).pack(anchor="w", padx=24)
+        font=(FONT, responsive_font_size(FONT_SCALE["callout"])),
+    ).pack(anchor="w", padx=tpad)
 
-    # ── 说明区 ──
-    info_frame = tk.Frame(dlg, bg=t.CARD)
-    info_frame.pack(fill="x", padx=24, pady=(18, 12))
+    # ═══════════════════════════════════════════════════════════════
+    # 功能卡片区 — Apple 卡片风格
+    # ═══════════════════════════════════════════════════════════════
 
-    lines = [
-        ("✅", "本地分析引擎 100% 离线可用，无需任何配置"),
-        ("🔍", "中文分词、命名实体识别、关键词提取、情感分析"),
-        ("🤖", "如需 AI 高级分析，可配置 OpenAI 兼容 API（如 DeepSeek）"),
-        ("🔒", "API 密钥仅存储在本地 _data/ 文件夹中，不会上传"),
+    features = [
+        ("✅", "纯本地引擎",
+         "jieba + spaCy + SnowNLP，100% 离线可用，无需联网"),
+        ("🔍", "深度文本分析",
+         "分词·命名实体·关键词·情感·依存句法·可读性"),
+        ("🤖", "可选 AI 增强",
+         "配置 OpenAI 兼容 API，解锁高级语言学分析"),
+        ("🔒", "数据完全本地",
+         "API 密钥仅存 _data/ 文件夹，绝不离开本机"),
+        ("🌓", "自动主题切换",
+         "跟随系统深色/浅色模式，减少视觉疲劳"),
     ]
-    for icon, text in lines:
-        row = tk.Frame(info_frame, bg=t.CARD)
-        row.pack(fill="x", pady=3)
-        tk.Label(row, text=icon, bg=t.CARD, font=(FONT, 11)).pack(side="left")
+
+    # 功能卡片容器
+    card_container = tk.Frame(scrollable, bg=t.CARD)
+    card_container.pack(fill="x", padx=tpad, pady=(16, 8))
+
+    for icon, title, desc in features:
+        card = tk.Frame(card_container, bg=t.BG)
+        card.pack(fill="x", pady=card_vpad)
+
         tk.Label(
-            row, text=text, bg=t.CARD, fg=t.TEXT,
-            font=(FONT, 10), anchor="w",
-        ).pack(side="left", padx=(8, 0))
+            card, text=icon,
+            bg=t.BG, fg=t.TEXT,
+            font=(FONT, responsive_font_size(FONT_SCALE["title3"])),
+        ).pack(side="left", padx=(card_ipadx, 10), pady=card_ipady)
 
-    # ── 提示 ──
-    tip = tk.Label(
-        dlg,
-        text="💡 可稍后在「设置 → API 配置」中随时配置。",
-        bg=t.CARD, fg=get_theme().MUTED,
-        font=(FONT, 9),
-    )
-    tip.pack(anchor="w", padx=24, pady=(0, 4))
+        text_col = tk.Frame(card, bg=t.BG)
+        text_col.pack(side="left", fill="x", expand=True, pady=card_ipady)
 
-    # ── 结果标记 ──
+        tk.Label(
+            text_col, text=title,
+            bg=t.BG, fg=t.TEXT,
+            font=(FONT, responsive_font_size(FONT_SCALE["headline"]), "bold"),
+            anchor="w",
+        ).pack(fill="x")
+
+        tk.Label(
+            text_col, text=desc,
+            bg=t.BG, fg=t.MUTED,
+            font=(FONT, responsive_font_size(FONT_SCALE["footnote"])),
+            anchor="w",
+        ).pack(fill="x", pady=(1, 0))
+
+    # ═══════════════════════════════════════════════════════════════
+    # 提示 — Apple footnote 层级
+    # ═══════════════════════════════════════════════════════════════
+
+    tk.Label(
+        scrollable,
+        text="💡 可稍后在菜单栏「设置 → API 配置」中随时修改。",
+        bg=t.CARD, fg=t.MUTED,
+        font=(FONT, responsive_font_size(FONT_SCALE["caption"])),
+    ).pack(anchor="w", padx=tpad, pady=(0, 8))
+
+    # ═══════════════════════════════════════════════════════════════
+    # 分隔线
+    # ═══════════════════════════════════════════════════════════════
+
+    sep = tk.Frame(scrollable, bg=t.BORDER, height=1)
+    sep.pack(fill="x", padx=tpad)
+
+    # ═══════════════════════════════════════════════════════════════
+    # 按钮区 — Apple 主次分明
+    # ═══════════════════════════════════════════════════════════════
+
     result = {"configured": False}
 
     def _do_configure():
         """打开 API 设置对话框。"""
-        dlg.withdraw()  # 隐藏欢迎窗
+        dlg.withdraw()
         parent.update_idletasks()
-        # 复用 App 的 open_api_settings；需要在 app 实例上调用
         app = getattr(parent, "_app_instance", None)
         if app:
             app.open_api_settings()
@@ -584,38 +825,45 @@ def show_first_run_setup(parent: tk.Tk) -> None:
         dlg.destroy()
 
     # ── 按钮区 ──
-    btn_frame = tk.Frame(dlg, bg=t.CARD)
-    btn_frame.pack(fill="x", padx=24, pady=(8, 18))
+    btn_frame = tk.Frame(scrollable, bg=t.CARD)
+    btn_frame.pack(fill="x", padx=tpad, pady=(16, 0))
 
-    # 跳过按钮（次要）
-    tk.Button(
-        btn_frame, text="跳过，使用本地分析  →",
-        bg=t.BUTTON_BG, fg=t.TEXT, font=(FONT, 10),
-        relief="flat", padx=18, pady=8,
-        activebackground=t.BUTTON_HOVER,
-        command=_do_skip,
-    ).pack(side="right", padx=(8, 0))
-
-    # 配置按钮（主要）
+    # 主要操作（右）— Accent / Filled，加高确保不截断
     tk.Button(
         btn_frame, text="🔌 配置 API 密钥",
-        bg=t.ACCENT, fg="#ffffff", font=(FONT, 10, "bold"),
-        relief="flat", padx=18, pady=8,
+        bg=t.ACCENT, fg="#ffffff",
+        font=(FONT, responsive_font_size(FONT_SCALE["body"]), "bold"),
+        relief="flat", padx=24, pady=12,
         activebackground=t.ACCENT_HOVER,
+        activeforeground="#ffffff",
+        bd=0, cursor="hand2",
         command=_do_configure,
     ).pack(side="right")
 
-    # "不再提示" 复选框
-    cb_frame = tk.Frame(dlg, bg=t.CARD)
-    cb_frame.pack(fill="x", padx=24, pady=(0, 20))
+    # 次要操作（左）— plain，与主按钮等高等宽
+    tk.Button(
+        btn_frame, text="跳过，使用本地分析",
+        bg=t.CARD, fg=t.MUTED,
+        font=(FONT, responsive_font_size(FONT_SCALE["body"])),
+        relief="flat", padx=16, pady=12,
+        activebackground=t.BUTTON_BG,
+        activeforeground=t.TEXT,
+        bd=0, cursor="hand2",
+        command=_do_skip,
+    ).pack(side="left")
+
+    # ── "不再提示" ──
+    cb_frame = tk.Frame(scrollable, bg=t.CARD)
+    cb_frame.pack(fill="x", padx=tpad, pady=(12, tpad))
+
     tk.Checkbutton(
         cb_frame,
-        text="下次不再显示此向导（可在设置中重新配置 API）",
+        text="下次不再显示此向导",
         variable=skip,
         bg=t.CARD, fg=t.MUTED,
         selectcolor=t.INPUT_BG,
         activebackground=t.CARD,
-        font=(FONT, 9),
+        font=(FONT, responsive_font_size(FONT_SCALE["footnote"])),
     ).pack(side="left")
 
     # 等待对话框关闭

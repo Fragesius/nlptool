@@ -121,18 +121,203 @@ def detect_language(text: str) -> str:
 # 句子切分
 # --------------------------------------------------------------------------- #
 
-# 中文句末标点 + 英文句末标点
-_SENT_SPLIT_RE = re.compile(r"([^。！？!?\.\n]+[。！？!?]|\S[^。！？!?\.\n]*\.(?=\s|$)|[^\n。！？!?]+(?=\n|$))")
+# 中文句末标点：。！？
+# 英文句末标点：. ! ?
+
+# 称谓缩写：后跟人名（大写字母开头）是正常的，不应切分
+_TITLES = {"mr", "mrs", "ms", "dr", "prof", "sr", "jr", "st"}
+
+# 其他缩写：后跟小写字母不切分；后跟大写字母通常是真正句子边界
+_OTHER_ABBREVIATIONS = {
+    # 公司/组织
+    "inc", "ltd", "corp", "co", "llc", "plc", "gmbh", "sa", "ag",
+    # 常见缩写
+    "vs", "etc", "approx", "no", "ave", "blvd", "dept",
+    "fig", "vol", "pp", "et", "al", "eq", "ch",
+    # 月份
+    "jan", "feb", "mar", "apr", "jun", "jul", "aug", "sep", "sept",
+    "oct", "nov", "dec",
+}
+_ABBREVIATIONS = _TITLES | _OTHER_ABBREVIATIONS
+
+# 中文句末标点 + 英文句末标点（用于扫描）
+_SENT_END_PUNCT = set("。！？!?\n")
+
+
+def _is_abbreviation(text: str, dot_pos: int) -> bool:
+    """判断 ``text[dot_pos]`` 处的句号是否属于缩写。
+
+    规则：
+    1. 句号前的单词（连续字母）在缩写列表中（如 ``Inc.``、``Mr.``、``Dr.``）
+    2. 首字母缩写模式：句号前是单个大写字母，且该字母前还有 ``字母.`` 模式
+       （如 ``U.S.A.`` 中的 ``U.``、``S.``、``A.``）
+    3. 单字母缩写连续模式：句号前是单字母，且句号后紧跟 ``字母.`` 或前面有 ``字母.``
+       （如 ``e.g.`` 中的 ``e.`` 后跟 ``g.``，或 ``g.`` 前面是 ``e.``）
+    """
+    # 向前扫描连续字母
+    i = dot_pos - 1
+    while i >= 0 and text[i].isalpha():
+        i -= 1
+    word = text[i + 1:dot_pos]
+    if not word:
+        return False
+
+    # 规则 1：常见缩写词
+    if word.lower() in _ABBREVIATIONS:
+        return True
+
+    if len(word) != 1:
+        return False
+
+    # 规则 2：单个大写字母（首字母缩写，如 U.S.A.）
+    # 检查该字母前面是否也是 "字母." 模式（连续首字母缩写）
+    if word.isupper():
+        # 向前检查：word 前面是 "."，再前面是字母，再前面是 "." 或行首
+        k = i  # word 开始位置 - 1（即 word 前一个字符）
+        if k >= 0 and text[k] == ".":
+            # 前面有句号，检查再前面是否为字母
+            m = k - 1
+            while m >= 0 and text[m].isalpha():
+                m -= 1
+            if k - 1 > m:  # 前面有字母
+                return True
+        # 也可能是第一个字母（如 "U.S.A." 的 "U"），后面跟 "S."
+        # 检查后面是否为 "字母." 模式
+        j = dot_pos + 1
+        while j < len(text) and text[j] in " \t":
+            j += 1
+        if (j + 1 < len(text) and text[j].isalpha() and text[j].isupper()
+                and text[j + 1] == "."):
+            return True
+        # 单个大写字母也可能是独立缩写（如 "U."），保守起见返回 True
+        return True
+
+    # 规则 3：单字母（小写），检查前后是否为 "字母." 模式（如 e.g.）
+    # 检查后面是否为 "字母." 模式
+    j = dot_pos + 1
+    while j < len(text) and text[j] in " \t":
+        j += 1
+    if (j + 1 < len(text) and text[j].isalpha()
+            and text[j + 1] == "."):
+        return True
+    # 检查前面是否为 "字母." 模式
+    k = i  # word 前
+    if k >= 0 and text[k] == ".":
+        m = k - 1
+        while m >= 0 and text[m].isalpha():
+            m -= 1
+        if k - 1 > m:
+            return True
+
+    return False
+
+
+def _get_prev_word(text: str, dot_pos: int) -> str:
+    """获取句号前的连续字母单词（原始大小写）。"""
+    i = dot_pos - 1
+    while i >= 0 and text[i].isalpha():
+        i -= 1
+    return text[i + 1:dot_pos]
 
 
 def split_sentences(text: str) -> List[str]:
-    """切分句子，兼顾中英文标点。"""
+    """切分句子，兼顾中英文标点和常见缩写。
+
+    与旧版纯正则不同，本实现用扫描器逐字符判断句号是否为真正的句子边界：
+    - 中文句末标点（。！？）总是切分
+    - 英文句号（.）切分，除非：
+      * 属于称谓缩写（``Mr.``/``Dr.``/``Mrs.`` 等）：后跟人名（大写）不切分
+      * 属于其他缩写（``Inc.``/``Ltd.``/``U.S.A.`` 等）且后跟小写字母：不切分
+      * 后跟数字（小数/版本号，如 ``3.14``、``2.0.1``）：不切分
+    - 换行符作为分隔符（保留段落结构）
+    """
     text = text.strip()
     if not text:
         return []
-    sents = _SENT_SPLIT_RE.findall(text)
-    # 过滤纯空白
-    return [s.strip() for s in sents if s.strip()]
+
+    sents: List[str] = []
+    start = 0
+    i = 0
+    n = len(text)
+    while i < n:
+        c = text[i]
+        if c == "\n":
+            if i > start:
+                seg = text[start:i].strip()
+                if seg:
+                    sents.append(seg)
+            start = i + 1
+            i += 1
+            continue
+        if c in "。！？!?":
+            seg = text[start:i + 1].strip()
+            if seg:
+                sents.append(seg)
+            start = i + 1
+            i += 1
+            continue
+        if c == ".":
+            # 先检查句号后是否紧跟数字（小数/版本号，如 3.14、2.0.1）
+            j = i + 1
+            while j < n and text[j] in " \t":
+                j += 1
+            next_char = text[j] if j < n else ""
+
+            if next_char.isdigit():
+                # 句号后跟数字，不切分（小数、版本号）
+                i += 1
+                continue
+
+            # 检查是否为缩写
+            if _is_abbreviation(text, i):
+                prev_word_raw = _get_prev_word(text, i)
+                prev_word = prev_word_raw.lower()
+                is_title = prev_word in _TITLES
+                # 称谓缩写（Mr./Dr./Mrs. 等）：后跟大写（人名）不切分
+                if is_title:
+                    i += 1
+                    continue
+                # 单字母大写缩写（如 U.S.A. 中的 U./S./A.）：
+                # 若后跟 "字母." 模式（如 A. 后跟 B.），属于连续首字母缩写，不切分
+                if len(prev_word_raw) == 1 and prev_word_raw.isupper():
+                    # 检查后面是否为 "字母." 模式
+                    k = i + 1
+                    while k < n and text[k] in " \t":
+                        k += 1
+                    if (k + 1 < n and text[k].isalpha()
+                            and text[k + 1] == "."):
+                        i += 1
+                        continue
+                # 非称谓缩写（Inc./Ltd./U.S.A. 等）：
+                #   - 后跟小写字母或标点：缩写内部，不切分
+                #   - 后跟大写字母：通常是真正句子边界，切分
+                if next_char and next_char.isupper():
+                    # 缩写后跟大写：真正的句子边界
+                    seg = text[start:i + 1].strip()
+                    if seg:
+                        sents.append(seg)
+                    start = i + 1
+                    i += 1
+                    continue
+                # 后跟小写或标点或行尾：不切分
+                i += 1
+                continue
+            # 真正的句子边界
+            seg = text[start:i + 1].strip()
+            if seg:
+                sents.append(seg)
+            start = i + 1
+            i += 1
+            continue
+        i += 1
+
+    # 处理末尾剩余
+    if start < n:
+        seg = text[start:].strip()
+        if seg:
+            sents.append(seg)
+
+    return sents
 
 
 # --------------------------------------------------------------------------- #
@@ -361,16 +546,43 @@ def named_entities(text: str, lang: Optional[str] = None) -> List[dict]:
 
 
 def dependencies(text: str, lang: Optional[str] = None) -> List[dict]:
-    """依存句法分析（依赖 spaCy）。"""
+    """依存句法分析（依赖 spaCy）。
+
+    每个词条附带了 ``sent_id``（句子编号）和 ``sent_i``（句内序号），
+    供可视化模块按句子分组绘制依存弧。
+
+    双语处理：对中英混合文本，按句子语言分别使用 zh / en 模型，
+    避免单一模型处理非目标语言时产生错误的依存关系
+    （例如 zh 模型会把英文 "I" 误标为 compound:nn）。
+    """
     lang = lang or detect_language(text)
+
+    # 混合语言：按句子分别用对应模型处理
+    if lang == "mixed":
+        return _dependencies_mixed(text)
+
     nlp = _get_spacy(lang if lang in ("en", "zh") else "en")
     if not nlp:
         return []
+
     doc = nlp(text)
-    deps = []
+    # 为每个句子建立 token 索引映射（-> 句内序号）
+    sent_boundaries: List[tuple] = []  # [(start_i, end_i), ...]
+    for sent in doc.sents:
+        sent_boundaries.append((sent.start, sent.end))
+
+    deps: List[dict] = []
     for t in doc:
         if t.is_space:
             continue
+        # 找到该 token 所属的句子 id 和句内序号
+        sent_id = 0
+        sent_i = 0
+        for sid, (s_start, s_end) in enumerate(sent_boundaries):
+            if s_start <= t.i < s_end:
+                sent_id = sid
+                sent_i = t.i - s_start
+                break
         deps.append(
             {
                 "text": t.text,
@@ -378,10 +590,57 @@ def dependencies(text: str, lang: Optional[str] = None) -> List[dict]:
                 "dep": t.dep_,
                 "head_text": t.head.text,
                 "head_pos": t.head.pos_,
-                "head_i": t.head.i,  # head 的 token 序号，消除重复词歧义
+                "head_i": t.head.i,        # head token 的全局序号
+                "token_i": t.i,            # 当前 token 自身的全局序号
+                "sent_id": sent_id,        # 句子编号
+                "sent_i": sent_i,          # 句内序号
             }
         )
     return deps
+
+
+def _dependencies_mixed(text: str) -> List[dict]:
+    """处理混合语言文本：按句子语言分别使用对应 spaCy 模型。
+
+    - 纯中文句 → zh 模型
+    - 纯英文句 → en 模型
+    - 句内仍混合（如「我用 Python 编程」）→ zh 模型（zh 处理混合句优于 en 处理中文）
+    每个句子的 token_i / head_i 均为句内序号（从 0 开始），
+    保证 ``_resolve_head_local`` 能在同一句内正确定位 head。
+    """
+    sents = split_sentences(text)
+    if not sents:
+        return []
+
+    all_deps: List[dict] = []
+    for sent_id, sent_text in enumerate(sents):
+        sent_lang = detect_language(sent_text)
+        if sent_lang == "mixed":
+            # 句内混合：含 CJK 用 zh 模型
+            sent_lang = "zh" if any("一" <= c <= "鿿" for c in sent_text) else "en"
+
+        nlp = _get_spacy(sent_lang if sent_lang in ("en", "zh") else "en")
+        if not nlp:
+            continue
+
+        doc = nlp(sent_text)
+        for t in doc:
+            if t.is_space:
+                continue
+            all_deps.append(
+                {
+                    "text": t.text,
+                    "pos": t.pos_,
+                    "dep": t.dep_,
+                    "head_text": t.head.text,
+                    "head_pos": t.head.pos_,
+                    "head_i": t.head.i,    # 句内 head 序号
+                    "token_i": t.i,        # 句内自身序号
+                    "sent_id": sent_id,
+                    "sent_i": t.i,         # 句内序号（单句处理时等于 t.i）
+                }
+            )
+    return all_deps
 
 
 # 极简情感分析（内置词典），返回 -1..1
@@ -441,16 +700,116 @@ def sentiment(text: str, lang: Optional[str] = None) -> dict:
 
 
 def analyze_syntax(text: str, lang: Optional[str] = None) -> SyntaxResult:
-    """一次性执行全部句法 / 语义分析。"""
+    """一次性执行全部句法 / 语义分析。
+
+    性能优化：单语情况下对整段文本只调用 spaCy ``nlp(text)`` **一次**，
+    从同一 ``Doc`` 提取 NER / 依存 / 分词，避免原路径中对同一段文本
+    重复处理 3-4 次（spaCy 是最重的操作）。
+    混合语言仍走原按句处理路径（每句语言不同，必须分别用对应模型）。
+    """
     lang = lang or detect_language(text)
+
+    # 混合语言：保持原路径（按句分别用对应模型）
+    if lang == "mixed":
+        return SyntaxResult(
+            ner=named_entities(text, lang),
+            keywords=extract_keywords(text, lang),
+            dependencies=dependencies(text, lang),
+            sentiment=sentiment(text, lang),
+            pos_tags=[t.as_dict() for t in tokenize(text, lang)],
+        )
+
+    # 单语：只调用 spaCy 一次，复用 Doc 提取所有结构化数据
     effective = lang if lang in ("en", "zh") else "en"
+    nlp = _get_spacy(effective)
+    if nlp:
+        doc = nlp(text)  # 唯一一次 spaCy 调用
+        ner = _spacy_doc_to_ner(doc)
+        deps = _spacy_doc_to_deps(doc)
+        tokens = _spacy_doc_to_tokens(doc, effective)
+    else:
+        # spaCy 不可用：回退到 jieba/正则路径
+        ner = []
+        deps = []
+        tokens = tokenize(text, lang)
+
     return SyntaxResult(
-        ner=named_entities(text, lang),
+        ner=ner,
         keywords=extract_keywords(text, lang),
-        dependencies=dependencies(text, lang),
+        dependencies=deps,
         sentiment=sentiment(text, lang),
-        pos_tags=[t.as_dict() for t in tokenize(text, lang)],
+        pos_tags=[t.as_dict() for t in tokens],
     )
+
+
+# --------------------------------------------------------------------------- #
+# spaCy Doc → 结构化数据（内部复用，避免重复 nlp 调用）
+# --------------------------------------------------------------------------- #
+
+
+def _spacy_doc_to_ner(doc) -> List[dict]:
+    """从 spaCy ``Doc`` 提取命名实体。"""
+    return [
+        {"text": ent.text, "label": ent.label_,
+         "start": ent.start_char, "end": ent.end_char}
+        for ent in doc.ents
+    ]
+
+
+def _spacy_doc_to_deps(doc) -> List[dict]:
+    """从 spaCy ``Doc`` 提取依存关系（含 sent_id / sent_i）。
+
+    复刻 :func:`dependencies` 单语路径的逻辑，但不重新调用 ``nlp``。
+    """
+    sent_boundaries: List[tuple] = [(s.start, s.end) for s in doc.sents]
+    deps: List[dict] = []
+    for t in doc:
+        if t.is_space:
+            continue
+        # 找到该 token 所属的句子 id 和句内序号
+        sent_id = 0
+        sent_i = 0
+        for sid, (s_start, s_end) in enumerate(sent_boundaries):
+            if s_start <= t.i < s_end:
+                sent_id = sid
+                sent_i = t.i - s_start
+                break
+        deps.append(
+            {
+                "text": t.text,
+                "pos": t.pos_,
+                "dep": t.dep_,
+                "head_text": t.head.text,
+                "head_pos": t.head.pos_,
+                "head_i": t.head.i,
+                "token_i": t.i,
+                "sent_id": sent_id,
+                "sent_i": sent_i,
+            }
+        )
+    return deps
+
+
+def _spacy_doc_to_tokens(doc, lang: str) -> List[Token]:
+    """从 spaCy ``Doc`` 提取 :class:`Token` 列表。
+
+    复刻 :func:`tokenize_en` 的 spaCy 路径，但不重新调用 ``nlp``。
+    """
+    stop_set = _ZH_STOP if lang == "zh" else _EN_STOP
+    tokens: List[Token] = []
+    for t in doc:
+        if t.is_space:
+            continue
+        tokens.append(
+            Token(
+                text=t.text,
+                pos=t.pos_,
+                lemma=t.lemma_.lower(),
+                is_stop=t.is_stop or t.text.lower() in stop_set,
+                lang=lang,
+            )
+        )
+    return tokens
 
 
 # --------------------------------------------------------------------------- #

@@ -52,28 +52,28 @@ class ThemeColors:
 
 LIGHT_THEME = ThemeColors(
     name="light",
-    BG="#eef1f5",
+    BG="#f5f5f7",           # Apple 系统灰
     CARD="#ffffff",
-    ACCENT="#2f6fed",
-    ACCENT_HOVER="#1f57c8",
-    ACCENT_SOFT="#e7efff",
-    TEXT="#1f2733",
-    MUTED="#6b7480",
-    BORDER="#d8dce6",
-    SUCCESS="#16a34a",
-    DANGER="#dc2626",
-    ROW_ALT="#f4f6fb",
-    SELECT_BG="#d6e4ff",
+    ACCENT="#0071e3",        # Apple 蓝
+    ACCENT_HOVER="#0060c7",
+    ACCENT_SOFT="#e8f2ff",
+    TEXT="#1d1d1f",          # Apple 主要标签色
+    MUTED="#86868b",         # Apple 次要标签色
+    BORDER="#d2d2d7",        # Apple 分隔线色
+    SUCCESS="#30b158",       # Apple 绿 (systemGreen)
+    DANGER="#eb4d3e",        # Apple 红 (systemRed)
+    ROW_ALT="#f5f5f7",
+    SELECT_BG="#cce4ff",
     MENU_BG="#ffffff",
-    MENU_FG="#1f2733",
+    MENU_FG="#1d1d1f",
     INPUT_BG="#ffffff",
-    INPUT_FG="#1f2733",
-    SCROLL_BG="#eef1f5",
-    SCROLL_HOVER="#d0d5de",
+    INPUT_FG="#1d1d1f",
+    SCROLL_BG="#f0f0f3",
+    SCROLL_HOVER="#d0d0d6",
     CHART_BG="#ffffff",
-    CHART_TEXT="#1f2733",
-    BUTTON_BG="#e6e9ef",
-    BUTTON_HOVER="#d0d5de",
+    CHART_TEXT="#1d1d1f",
+    BUTTON_BG="#f0f0f3",
+    BUTTON_HOVER="#e0e0e5",
 )
 
 
@@ -83,37 +83,59 @@ LIGHT_THEME = ThemeColors(
 
 DARK_THEME = ThemeColors(
     name="dark",
-    BG="#141529",
-    CARD="#1e2038",
-    ACCENT="#7b8cff",
-    ACCENT_HOVER="#99a5ff",
-    ACCENT_SOFT="#1f2245",
-    TEXT="#e2e4f0",
-    MUTED="#8b8fa8",
-    BORDER="#2d3050",
-    SUCCESS="#4ade80",
-    DANGER="#f87171",
-    ROW_ALT="#191c30",
-    SELECT_BG="#2a2f55",
-    MENU_BG="#1e2038",
-    MENU_FG="#e2e4f0",
-    INPUT_BG="#1a1c2e",
-    INPUT_FG="#e2e4f0",
-    SCROLL_BG="#1e2038",
-    SCROLL_HOVER="#3d4060",
-    CHART_BG="#141529",
-    CHART_TEXT="#e2e4f0",
-    BUTTON_BG="#2a2d48",
-    BUTTON_HOVER="#353858",
+    BG="#1c1c1e",           # Apple 深色系统背景
+    CARD="#2c2c2e",         # Apple 深色卡片
+    ACCENT="#0a84ff",        # Apple 深色蓝
+    ACCENT_HOVER="#409cff",
+    ACCENT_SOFT="#1c3150",
+    TEXT="#f5f5f7",         # Apple 深色主要标签
+    MUTED="#98989d",         # Apple 深色次要标签
+    BORDER="#3a3a3c",        # Apple 深色分隔线
+    SUCCESS="#30d158",       # Apple 深色绿
+    DANGER="#ff453a",        # Apple 深色红
+    ROW_ALT="#232325",
+    SELECT_BG="#3a4f6b",
+    MENU_BG="#2c2c2e",
+    MENU_FG="#f5f5f7",
+    INPUT_BG="#1c1c1e",
+    INPUT_FG="#f5f5f7",
+    SCROLL_BG="#2c2c2e",
+    SCROLL_HOVER="#48484a",
+    CHART_BG="#1c1c1e",
+    CHART_TEXT="#f5f5f7",
+    BUTTON_BG="#3a3a3c",
+    BUTTON_HOVER="#48484a",
 )
 
 
 # --------------------------------------------------------------------------- #
-# 字体
+# 字体 — Apple HIG 风格排版层级
 # --------------------------------------------------------------------------- #
 
-FONT = "Microsoft YaHei UI"
-FONT_MONO = "Consolas"
+FONT = "Microsoft YaHei UI"          # Windows 等效于 SF Pro
+FONT_MONO = "Consolas"              # 等效于 SF Mono
+
+# Apple 文本样式层级（适配桌面端 13pt 基准）
+# macOS 正文默认 13pt，与 8pt 网格对齐
+FONT_SCALE = {
+    "largeTitle":   20,   # 屏幕标题 (Apple: 34pt iOS, 桌面缩小适配)
+    "title":        17,   # 区域标题 (Apple: 28pt iOS → 窗口标题)
+    "title2":       15,   # 子区域标题
+    "title3":       13,   # 分组标题
+    "headline":     11,   # 行标题 (Semibold)
+    "body":         10,   # 正文
+    "callout":      10,   # 次要内容 (同 body，区分语义)
+    "footnote":      9,   # 辅助文字
+    "caption":       8,   # 标签 / 小标签 (Apple .caption1/.caption2)
+}
+
+# 字重映射 — Apple 警告避免 Ultralight/Thin/Light
+FONT_WEIGHTS = {
+    "regular":      "normal",
+    "medium":       "normal",    # tkinter 仅支持 normal/bold；用大小区分
+    "semibold":     "bold",
+    "bold":         "bold",
+}
 
 
 # --------------------------------------------------------------------------- #
@@ -224,6 +246,105 @@ def enable_dpi_awareness() -> None:
 
 
 # --------------------------------------------------------------------------- #
+# 响应式布局基础设施
+# --------------------------------------------------------------------------- #
+
+_screen_size: "tuple[int, int] | None" = None
+
+
+def get_screen_size() -> "tuple[int, int]":
+    """返回主显示器宽高 (w, h)，缓存结果。"""
+    global _screen_size
+    if _screen_size is not None:
+        return _screen_size
+    try:
+        # 优先用 tkinter 获取（需要 root 已创建，fallback 用 ctypes）
+        import tkinter as tk
+        root = tk.Tk()
+        root.withdraw()
+        w = root.winfo_screenwidth()
+        h = root.winfo_screenheight()
+        root.destroy()
+        _screen_size = (w, h)
+    except Exception:
+        # 最终 fallback: 假设 1080p
+        _screen_size = (1920, 1080)
+    return _screen_size
+
+
+def get_scale_factor() -> float:
+    """根据屏幕高度返回缩放因子。
+
+    >= 1440px 高: 1.00  (2K/4K 显示器)
+    >= 1080px 高: 0.92  (1080p)
+    >=  900px 高: 0.85  (900p)
+    >=  768px 高: 0.78  (1366×768 笔记本)
+    >=  720px 高: 0.72  (720p)
+    """
+    _, h = get_screen_size()
+    if h >= 1440:
+        return 1.0
+    if h >= 1080:
+        return 0.92
+    if h >= 900:
+        return 0.85
+    if h >= 768:
+        return 0.78
+    return 0.72
+
+
+def get_responsive_window_size() -> "tuple[int, int]":
+    """返回自适应窗口尺寸 (w, h)。
+
+    宽度: min(1400, 屏幕宽×0.88)
+    高度: min(920, 屏幕高×0.90)
+    但至少 1024×680。
+    """
+    sw, sh = get_screen_size()
+    w = min(1400, int(sw * 0.88))
+    h = min(920, int(sh * 0.90))
+    w = max(w, 1024)
+    h = max(h, 680)
+    return (w, h)
+
+
+def get_responsive_min_size() -> "tuple[int, int]":
+    """返回自适应最小窗口尺寸。
+
+    720p:  880×560
+    768p:  920×580
+    其他:  1024×640
+    """
+    _, sh = get_screen_size()
+    if sh <= 720:
+        return (860, 560)
+    if sh <= 768:
+        return (920, 600)
+    return (1024, 640)
+
+
+def is_compact_mode() -> bool:
+    """屏幕高度 ≤ 768px 时启用紧凑模式。"""
+    _, sh = get_screen_size()
+    return sh <= 768
+
+
+def get_responsive_font_scale() -> float:
+    """字体缩放因子（紧凑模式下略微缩小）。"""
+    return 0.92 if is_compact_mode() else 1.0
+
+
+def responsive_padding(base: int) -> int:
+    """根据屏幕缩放因子调整 padding 值。"""
+    return max(4, int(base * get_scale_factor()))
+
+
+def responsive_font_size(base: int) -> int:
+    """根据屏幕缩放因子调整字号。"""
+    return max(8, int(base * get_responsive_font_scale()))
+
+
+# --------------------------------------------------------------------------- #
 # 样式应用
 # --------------------------------------------------------------------------- #
 
@@ -239,20 +360,44 @@ def apply_style(root: tk.Tk) -> None:
     except Exception:
         pass
 
+    # ── 响应式字号 ──
+    _body_sz = responsive_font_size(FONT_SCALE["body"])           # 10 → 9 (compact)
+    _headline_sz = responsive_font_size(FONT_SCALE["headline"])   # 11 → 10
+    _title3_sz = responsive_font_size(FONT_SCALE["title3"])       # 13 → 12
+    _title2_sz = responsive_font_size(FONT_SCALE["title2"])       # 15 → 14
+    _title_sz = responsive_font_size(FONT_SCALE["title"])         # 17 → 15
+    _footnote_sz = responsive_font_size(FONT_SCALE["footnote"])   # 9 → 8
+    _caption_sz = responsive_font_size(FONT_SCALE["caption"])     # 8 → 7
+
     # ===================================================================== #
-    # 全局默认
+    # 全局默认 — Apple HIG 排版层级
     # ===================================================================== #
-    style.configure(".", background=t.BG, foreground=t.TEXT, font=(FONT, 10),
+    style.configure(".", background=t.BG, foreground=t.TEXT,
+                    font=(FONT, _body_sz),
                     troughcolor=t.BG, fieldbackground=t.INPUT_BG)
 
     style.configure("TFrame", background=t.BG)
-    style.configure("TLabel", background=t.BG, foreground=t.TEXT, font=(FONT, 10))
-    style.configure("Muted.TLabel", background=t.BG, foreground=t.MUTED, font=(FONT, 9))
-    style.configure("Title.TLabel", background=t.BG, foreground=t.TEXT, font=(FONT, 15, "bold"))
-    style.configure("Subtitle.TLabel", background=t.BG, foreground=t.MUTED, font=(FONT, 9))
+    style.configure("TLabel", background=t.BG, foreground=t.TEXT,
+                    font=(FONT, _body_sz))
+
+    # 语义标签样式 — Apple labelColor 体系
+    style.configure("Muted.TLabel", background=t.BG, foreground=t.MUTED,
+                    font=(FONT, _footnote_sz))
+    style.configure("Title.TLabel", background=t.BG, foreground=t.TEXT,
+                    font=(FONT, _title2_sz, "bold"))
+    style.configure("Subtitle.TLabel", background=t.BG, foreground=t.MUTED,
+                    font=(FONT, _footnote_sz))
+    style.configure("Headline.TLabel", background=t.BG, foreground=t.TEXT,
+                    font=(FONT, _headline_sz, "bold"))
+    style.configure("Callout.TLabel", background=t.BG, foreground=t.TEXT,
+                    font=(FONT, _body_sz))
+    style.configure("Footnote.TLabel", background=t.BG, foreground=t.MUTED,
+                    font=(FONT, _footnote_sz))
+    style.configure("Caption.TLabel", background=t.BG, foreground=t.MUTED,
+                    font=(FONT, _caption_sz))
 
     # ===================================================================== #
-    # 卡片容器
+    # 卡片容器 — Apple 风格：柔和边框 + 充足内边距 + 8px 圆角
     # ===================================================================== #
     style.configure(
         "Card.TLabelframe",
@@ -265,16 +410,32 @@ def apply_style(root: tk.Tk) -> None:
         "Card.TLabelframe.Label",
         background=t.CARD,
         foreground=t.TEXT,
-        font=(FONT, 10, "bold"),
+        font=(FONT, _headline_sz, "bold"),
+    )
+
+    # 强调卡片（用于首次引导 / 重要区域）
+    style.configure(
+        "Emphasis.TLabelframe",
+        background=t.ACCENT_SOFT,
+        bordercolor=t.ACCENT,
+        relief="solid",
+        borderwidth=1,
+    )
+    style.configure(
+        "Emphasis.TLabelframe.Label",
+        background=t.ACCENT_SOFT,
+        foreground=t.ACCENT,
+        font=(FONT, _headline_sz, "bold"),
     )
 
     # ===================================================================== #
-    # 按钮
+    # 按钮 — Apple HIG 层级：Accent (filled) > Secondary (borderless) > Tertiary (plain)
     # ===================================================================== #
+    # 标准按钮 (Tertiary)
     style.configure(
         "TButton",
-        font=(FONT, 10),
-        padding=(14, 7),
+        font=(FONT, _body_sz),
+        padding=(16, 8),
         background=t.BUTTON_BG,
         foreground=t.TEXT,
         borderwidth=0,
@@ -286,11 +447,11 @@ def apply_style(root: tk.Tk) -> None:
         foreground=[("active", t.TEXT)],
     )
 
-    # 主按钮（强调色）
+    # 主按钮 (Accent / Filled) — 仅一个页面一个
     style.configure(
         "Accent.TButton",
-        font=(FONT, 10, "bold"),
-        padding=(18, 8),
+        font=(FONT, _body_sz, "bold"),
+        padding=(20, 9),
         background=t.ACCENT,
         foreground="#ffffff",
         borderwidth=0,
@@ -302,10 +463,26 @@ def apply_style(root: tk.Tk) -> None:
         foreground=[("active", "#ffffff"), ("disabled", "#a0a0c0")],
     )
 
+    # 次要按钮 (Secondary / Borderless accent)
+    style.configure(
+        "Secondary.TButton",
+        font=(FONT, _body_sz),
+        padding=(16, 8),
+        background=t.CARD,
+        foreground=t.ACCENT,
+        borderwidth=0,
+        relief="flat",
+    )
+    style.map(
+        "Secondary.TButton",
+        background=[("active", t.ACCENT_SOFT), ("pressed", t.ACCENT_SOFT)],
+        foreground=[("active", t.ACCENT)],
+    )
+
     # 危险按钮
     style.configure(
         "Danger.TButton",
-        font=(FONT, 10),
+        font=(FONT, _body_sz),
         padding=(14, 7),
         background=t.ROW_ALT,
         foreground=t.DANGER,
@@ -321,7 +498,7 @@ def apply_style(root: tk.Tk) -> None:
     # 注：主题切换按钮使用 tk.Button（见 main_window.py），不依赖 ttk 样式
 
     # ===================================================================== #
-    # 输入控件
+    # 输入控件 — Apple 风格：柔和边框 + 聚焦高亮
     # ===================================================================== #
     style.configure(
         "TEntry",
@@ -333,6 +510,7 @@ def apply_style(root: tk.Tk) -> None:
         relief="solid",
         borderwidth=1,
         padding=6,
+        font=(FONT, _body_sz),
     )
     style.map(
         "TEntry",
@@ -353,6 +531,7 @@ def apply_style(root: tk.Tk) -> None:
         borderwidth=1,
         padding=6,
         arrowcolor=t.MUTED,
+        font=(FONT, _body_sz),
     )
     style.map(
         "TCombobox",
@@ -364,10 +543,10 @@ def apply_style(root: tk.Tk) -> None:
     root.option_add("*TCombobox*Listbox.foreground", t.TEXT)
     root.option_add("*TCombobox*Listbox.selectBackground", t.ACCENT_SOFT)
     root.option_add("*TCombobox*Listbox.selectForeground", t.TEXT)
-    root.option_add("*TCombobox*Listbox.font", (FONT, 10))
+    root.option_add("*TCombobox*Listbox.font", (FONT, _body_sz))
 
     # ===================================================================== #
-    # Notebook 标签页
+    # Notebook 标签页 — Apple 风格分段控件
     # ===================================================================== #
     style.configure(
         "TNotebook",
@@ -379,8 +558,8 @@ def apply_style(root: tk.Tk) -> None:
         "TNotebook.Tab",
         background=t.BG,
         foreground=t.MUTED,
-        padding=(22, 10),
-        font=(FONT, 10),
+        padding=(24, 11),
+        font=(FONT, _body_sz),
         borderwidth=0,
     )
     style.map(
@@ -402,7 +581,7 @@ def apply_style(root: tk.Tk) -> None:
         background=t.CARD,
         foreground=t.MUTED,
         padding=(16, 7),
-        font=(FONT, 9),
+        font=(FONT, _footnote_sz),
         borderwidth=0,
     )
     style.map(
@@ -457,14 +636,14 @@ def apply_style(root: tk.Tk) -> None:
         foreground=t.TEXT,
         fieldbackground=t.CARD,
         borderwidth=0,
-        font=(FONT, 10),
-        rowheight=32,
+        font=(FONT, _body_sz),
+        rowheight=36,
     )
     style.configure(
         "Treeview.Heading",
         background=t.ROW_ALT,
         foreground=t.MUTED,
-        font=(FONT, 9, "bold"),
+        font=(FONT, _footnote_sz, "bold"),
         borderwidth=0,
         padding=(10, 6),
     )
@@ -505,14 +684,14 @@ def apply_style(root: tk.Tk) -> None:
     root.option_add("*Menu.activeBackground", t.ACCENT_SOFT)
     root.option_add("*Menu.activeForeground", t.TEXT)
     root.option_add("*Menu.borderWidth", 0)
-    root.option_add("*Menu.font", (FONT, 10))
+    root.option_add("*Menu.font", (FONT, _body_sz))
 
     # ===================================================================== #
     # Text / ScrolledText（通过 option_db 设置默认值）
     # ===================================================================== #
     root.option_add("*Text.background", t.INPUT_BG)
     root.option_add("*Text.foreground", t.INPUT_FG)
-    root.option_add("*Text.font", (FONT_MONO, 10))
+    root.option_add("*Text.font", (FONT_MONO, _body_sz))
     root.option_add("*Text.borderWidth", 0)
     root.option_add("*Text.highlightThickness", 1)
     root.option_add("*Text.highlightBackground", t.BORDER)
@@ -520,8 +699,8 @@ def apply_style(root: tk.Tk) -> None:
     root.option_add("*Text.selectBackground", t.SELECT_BG)
     root.option_add("*Text.selectForeground", t.TEXT)
     root.option_add("*Text.insertBackground", t.TEXT)
-    root.option_add("*Text.padX", 8)
-    root.option_add("*Text.padY", 6)
+    root.option_add("*Text.padX", 10)
+    root.option_add("*Text.padY", 8)
 
     # ===================================================================== #
     # 窗口背景
