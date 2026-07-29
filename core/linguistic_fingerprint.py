@@ -766,15 +766,13 @@ def weighted_cosine_similarity(fv_a: FeatureVector, fv_b: FeatureVector) -> floa
 
     # ── 辅助：余弦相似度 + 空向量 fallback ──
     # 如果某一方向量为空（文本太短导致该维度无数据），cosine 会返回 0.0，
-    # 但 0 意味着"完全相反"，会不公平地拉低总分。
+    # 但 0 意味着"完全不相似"，会不公平地拉低总分。
     # 无数据时应给中性分 0.5，既不支持也不反对。
+    # 注意：两个非空向量正交（cos=0）是真实的"不相似"信号，不应给中性分。
     def _cos_or_neutral(a_vec: List[float], b_vec: List[float]) -> float:
         if not a_vec or not b_vec:
             return 0.5
-        sim = cosine_similarity(a_vec, b_vec)
-        if sim == 0.0 and (not a_vec or not b_vec):
-            return 0.5
-        return sim
+        return cosine_similarity(a_vec, b_vec)
 
     # 1. 词长分布
     scores["word_length_dist"] = _cos_or_neutral(
@@ -951,8 +949,9 @@ def wilcoxon_signed_rank_test(differences: List[float]) -> float:
 
     z = (t_stat - expected) / std
 
-    # 双侧 p-value
-    p = 2.0 * _normal_cdf(z)
+    # 双侧 p-value：2 * (1 - Φ(|z|))
+    # 注意：必须用 |z|，否则当 t_stat > expected（反向偏离）时会得到 p > 1
+    p = 2.0 * _normal_sf(abs(z))
     return min(max(p, 0.0), 1.0)
 
 
@@ -995,10 +994,18 @@ def permutation_test(
 
 
 def cohens_d(
-    mean_a: float, mean_b: float, std_a: float, std_b: float
+    mean_a: float, mean_b: float, std_a: float, std_b: float,
+    n_a: int = 0, n_b: int = 0,
 ) -> float:
-    """Cohen's d 效应量。"""
-    pooled_var = (std_a**2 + std_b**2) / 2.0
+    """Cohen's d 效应量。
+
+    当 n_a, n_b > 1 时使用样本量加权的合并方差（标准 Cohen's d），
+    否则退化为简单平均（向后兼容）。
+    """
+    if n_a > 1 and n_b > 1:
+        pooled_var = ((n_a - 1) * std_a**2 + (n_b - 1) * std_b**2) / (n_a + n_b - 2)
+    else:
+        pooled_var = (std_a**2 + std_b**2) / 2.0
     if pooled_var < 1e-12:
         return 0.0
     return (mean_a - mean_b) / math.sqrt(pooled_var)
@@ -1046,12 +1053,20 @@ def analyze_fingerprint(
     # --- 2. 语言检测 ---
     if lang is None:
         lang = detect_language(suspect_text)
+    if lang == "mixed":
+        raise ValueError(
+            "不支持中英混合文本进行语言指纹分析，请提供纯中文或纯英文文本。"
+        )
     all_texts = [suspect_text, suspect_author_text] + controls
+    # 检查所有文本语言一致性：某文本检测到不同语言（且非 mixed）时直接报错，
+    # 否则后续 tokenize / 虚词集合会全部走错路径，特征向量接近全零。
     for txt in all_texts:
         txt_lang = detect_language(txt)
         if txt_lang != lang and txt_lang != "mixed":
-            # 如果某文本与检测语言不符，统一用 A 的 lang
-            pass
+            raise ValueError(
+                f"文本语言不一致：期望 {lang}，但检测到 {txt_lang}。"
+                f"请确保 A、B 及所有对照作者使用同一种语言。"
+            )
 
     # --- 3. 构建全局词汇表 ---
     vocab = build_global_vocab(all_texts, lang)
@@ -1097,21 +1112,30 @@ def analyze_fingerprint(
 
     p_w = wilcoxon_signed_rank_test(differences)
 
-    # 置换检验
-    all_ctrl_sims = []
+    # 置换检验：对每个对照单独做（H0: A↔B 与 A↔Ci 同分布），
+    # 取最大 p 值作为最终 p_perm（Bonferroni 风格的保守做法，对抗多重比较假阳性）。
+    # 旧版把所有对照的片段相似度堆成一个池，相当于假设所有对照作者同分布，
+    # 与"对照代表不同写作风格"的设计相悖。
+    p_perms: List[float] = []
     for sc in sim_controls:
-        all_ctrl_sims.extend(sc.segment_similarities)
-    p_perm = permutation_test(sim_b.segment_similarities, all_ctrl_sims)
+        if sc.segment_similarities:
+            p_perms.append(
+                permutation_test(sim_b.segment_similarities, sc.segment_similarities)
+            )
+    p_perm = max(p_perms) if p_perms else 1.0
 
-    # Cohen's d
+    # Cohen's d（使用样本量加权的合并方差）
     mean_ctrl = sum(
         sc.mean_similarity for sc in sim_controls
     ) / len(sim_controls) if sim_controls else 0.0
     pooled_std_ctrl = math.sqrt(
         sum(sc.std_similarity**2 for sc in sim_controls) / len(sim_controls)
     ) if sim_controls else 0.0
+    n_a_segs = len(sim_b.segment_similarities)
+    n_ctrl_segs = sum(len(sc.segment_similarities) for sc in sim_controls)
     d_val = cohens_d(
-        sim_b.mean_similarity, mean_ctrl, sim_b.std_similarity, pooled_std_ctrl
+        sim_b.mean_similarity, mean_ctrl, sim_b.std_similarity, pooled_std_ctrl,
+        n_a_segs, n_ctrl_segs,
     )
 
     # --- 8. 判定 ---
