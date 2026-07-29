@@ -76,7 +76,7 @@ configure_fonts()
 # 深色模式辅助
 # --------------------------------------------------------------------------- #
 
-# 深色主题 matplotlib 配色（Apple 风格）
+# 深色主题 matplotlib 配色
 _DARK_BG = "#1c1c1e"
 _DARK_AXES_BG = "#2c2c2e"
 _DARK_TEXT = "#f5f5f7"
@@ -158,7 +158,7 @@ def make_freq_bar(freq: Counter, topk: int = 20, title: str = "高频词",
     words, counts = zip(*items)
 
     fig, ax = plt.subplots(figsize=(8, 4.5))
-    bar_color = "#0A84FF" if dark_mode else "#007AFF"  # Apple blue
+    bar_color = "#0A84FF" if dark_mode else "#007AFF"
     ax.bar(range(len(words)), counts, color=bar_color, alpha=0.88)
     ax.set_xticks(range(len(words)))
     ax.set_xticklabels(words, rotation=45, ha="right")
@@ -912,7 +912,7 @@ def make_fingerprint_bar(
     stds: List[float] = [sim_b.std_similarity]
     colors: List[str] = []
 
-    accent = "#0A84FF" if dark_mode else "#007AFF"  # Apple blue
+    accent = "#0A84FF" if dark_mode else "#007AFF"
     muted_gray = "#98989d" if dark_mode else "#8e8e93"
     colors.append(accent)
 

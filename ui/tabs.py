@@ -1176,7 +1176,7 @@ class FingerprintTab(ttk.Frame):
         # 默认添加一个对照
         self._add_control()
 
-        # ── 图表区域 ──（Apple 卡片风格）
+        # ── 图表区域 ──
         self.chart_frame = ttk.LabelFrame(self, text="📊 相似度对比图",
                                           style="Card.TLabelframe")
         self.chart_frame.pack(fill="both", expand=True, padx=10, pady=(6, 2))
