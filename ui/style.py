@@ -52,16 +52,16 @@ class ThemeColors:
 
 LIGHT_THEME = ThemeColors(
     name="light",
-    BG="#f5f5f7",           # Apple 系统灰
+    BG="#f5f5f7",           # 系统灰
     CARD="#ffffff",
-    ACCENT="#0071e3",        # Apple 蓝
+    ACCENT="#0071e3",        # 主色蓝
     ACCENT_HOVER="#0060c7",
     ACCENT_SOFT="#e8f2ff",
-    TEXT="#1d1d1f",          # Apple 主要标签色
-    MUTED="#86868b",         # Apple 次要标签色
-    BORDER="#d2d2d7",        # Apple 分隔线色
-    SUCCESS="#30b158",       # Apple 绿 (systemGreen)
-    DANGER="#eb4d3e",        # Apple 红 (systemRed)
+    TEXT="#1d1d1f",          # 主要标签色
+    MUTED="#86868b",         # 次要标签色
+    BORDER="#d2d2d7",        # 分隔线色
+    SUCCESS="#30b158",       # 成功绿
+    DANGER="#eb4d3e",        # 危险红
     ROW_ALT="#f5f5f7",
     SELECT_BG="#cce4ff",
     MENU_BG="#ffffff",
@@ -83,16 +83,16 @@ LIGHT_THEME = ThemeColors(
 
 DARK_THEME = ThemeColors(
     name="dark",
-    BG="#1c1c1e",           # Apple 深色系统背景
-    CARD="#2c2c2e",         # Apple 深色卡片
-    ACCENT="#0a84ff",        # Apple 深色蓝
+    BG="#1c1c1e",           # 深色系统背景
+    CARD="#2c2c2e",         # 深色卡片
+    ACCENT="#0a84ff",        # 深色主色蓝
     ACCENT_HOVER="#409cff",
     ACCENT_SOFT="#1c3150",
-    TEXT="#f5f5f7",         # Apple 深色主要标签
-    MUTED="#98989d",         # Apple 深色次要标签
-    BORDER="#3a3a3c",        # Apple 深色分隔线
-    SUCCESS="#30d158",       # Apple 深色绿
-    DANGER="#ff453a",        # Apple 深色红
+    TEXT="#f5f5f7",         # 深色主要标签
+    MUTED="#98989d",         # 深色次要标签
+    BORDER="#3a3a3c",        # 深色分隔线
+    SUCCESS="#30d158",       # 深色成功绿
+    DANGER="#ff453a",        # 深色危险红
     ROW_ALT="#232325",
     SELECT_BG="#3a4f6b",
     MENU_BG="#2c2c2e",
@@ -109,27 +109,27 @@ DARK_THEME = ThemeColors(
 
 
 # --------------------------------------------------------------------------- #
-# 字体 — Apple HIG 风格排版层级
+# 字体 — 排版层级
 # --------------------------------------------------------------------------- #
 
-FONT = "Microsoft YaHei UI"          # Windows 等效于 SF Pro
-FONT_MONO = "Consolas"              # 等效于 SF Mono
+FONT = "Microsoft YaHei UI"          # 系统 UI 字体
+FONT_MONO = "Consolas"              # 等宽字体
 
-# Apple 文本样式层级（适配桌面端 13pt 基准）
-# macOS 正文默认 13pt，与 8pt 网格对齐
+# 文本样式层级（适配桌面端 13pt 基准）
+# 正文默认 13pt，与 8pt 网格对齐
 FONT_SCALE = {
-    "largeTitle":   20,   # 屏幕标题 (Apple: 34pt iOS, 桌面缩小适配)
-    "title":        17,   # 区域标题 (Apple: 28pt iOS → 窗口标题)
+    "largeTitle":   20,   # 屏幕标题
+    "title":        17,   # 区域标题
     "title2":       15,   # 子区域标题
     "title3":       13,   # 分组标题
     "headline":     11,   # 行标题 (Semibold)
     "body":         10,   # 正文
     "callout":      10,   # 次要内容 (同 body，区分语义)
     "footnote":      9,   # 辅助文字
-    "caption":       8,   # 标签 / 小标签 (Apple .caption1/.caption2)
+    "caption":       8,   # 标签 / 小标签
 }
 
-# 字重映射 — Apple 警告避免 Ultralight/Thin/Light
+# 字重映射 — 避免 Ultralight/Thin/Light
 FONT_WEIGHTS = {
     "regular":      "normal",
     "medium":       "normal",    # tkinter 仅支持 normal/bold；用大小区分
@@ -370,7 +370,7 @@ def apply_style(root: tk.Tk) -> None:
     _caption_sz = responsive_font_size(FONT_SCALE["caption"])     # 8 → 7
 
     # ===================================================================== #
-    # 全局默认 — Apple HIG 排版层级
+    # 全局默认 — 排版层级
     # ===================================================================== #
     style.configure(".", background=t.BG, foreground=t.TEXT,
                     font=(FONT, _body_sz),
@@ -380,7 +380,7 @@ def apply_style(root: tk.Tk) -> None:
     style.configure("TLabel", background=t.BG, foreground=t.TEXT,
                     font=(FONT, _body_sz))
 
-    # 语义标签样式 — Apple labelColor 体系
+    # 语义标签样式 — labelColor 体系
     style.configure("Muted.TLabel", background=t.BG, foreground=t.MUTED,
                     font=(FONT, _footnote_sz))
     style.configure("Title.TLabel", background=t.BG, foreground=t.TEXT,
@@ -397,7 +397,7 @@ def apply_style(root: tk.Tk) -> None:
                     font=(FONT, _caption_sz))
 
     # ===================================================================== #
-    # 卡片容器 — Apple 风格：柔和边框 + 充足内边距 + 8px 圆角
+    # 卡片容器 — 柔和边框 + 充足内边距 + 8px 圆角
     # ===================================================================== #
     style.configure(
         "Card.TLabelframe",
@@ -429,7 +429,7 @@ def apply_style(root: tk.Tk) -> None:
     )
 
     # ===================================================================== #
-    # 按钮 — Apple HIG 层级：Accent (filled) > Secondary (borderless) > Tertiary (plain)
+    # 按钮 — 层级：Accent (filled) > Secondary (borderless) > Tertiary (plain)
     # ===================================================================== #
     # 标准按钮 (Tertiary)
     style.configure(
@@ -498,7 +498,7 @@ def apply_style(root: tk.Tk) -> None:
     # 注：主题切换按钮使用 tk.Button（见 main_window.py），不依赖 ttk 样式
 
     # ===================================================================== #
-    # 输入控件 — Apple 风格：柔和边框 + 聚焦高亮
+    # 输入控件 — 柔和边框 + 聚焦高亮
     # ===================================================================== #
     style.configure(
         "TEntry",
@@ -546,7 +546,7 @@ def apply_style(root: tk.Tk) -> None:
     root.option_add("*TCombobox*Listbox.font", (FONT, _body_sz))
 
     # ===================================================================== #
-    # Notebook 标签页 — Apple 风格分段控件
+    # Notebook 标签页 — 分段控件风格
     # ===================================================================== #
     style.configure(
         "TNotebook",

@@ -526,10 +526,7 @@ class App:
         sample = (
             "自然语言处理是人工智能的重要分支。它让计算机能够理解人类语言。\n"
             "近年来，深度学习大幅推动了该领域的发展。然而挑战依然存在。\n\n"
-            "苹果公司总部位于美国加利福尼亚州的库比蒂诺，由蒂姆·库克担任首席执行官。"
-            "这家公司在全球拥有数十亿用户。\n\n"
-            "Apple Inc. is headquartered in Cupertino, California. "
-            "Tim Cook is the CEO of the tech giant. "
+
             "Natural language processing is a fascinating field. "
             "It enables computers to understand human language. "
             "Deep learning has greatly advanced this area, but challenges remain."
@@ -646,9 +643,7 @@ class App:
 
 
 def show_first_run_setup(parent: tk.Tk) -> None:
-    """Apple HIG 风格首次运行向导：引导用户配置 API 密钥。
-
-    设计遵循 Apple 原则：Purpose（意图明确）、Agency（用户掌控）、Simplicity（简洁但不简陋）。
+    """首次运行向导：引导用户配置 API 密钥。
     """
     from core._paths import mark_setup_done
     from ui.style import get_theme as _t, get_screen_size, is_compact_mode
@@ -716,7 +711,7 @@ def show_first_run_setup(parent: tk.Tk) -> None:
         scrollable.pack(fill="both", expand=True)
 
     # ═══════════════════════════════════════════════════════════════
-    # 标题区 — Apple largeTitle 层级
+    # 标题区
     # ═══════════════════════════════════════════════════════════════
 
     tk.Label(
@@ -734,7 +729,7 @@ def show_first_run_setup(parent: tk.Tk) -> None:
     ).pack(anchor="w", padx=tpad)
 
     # ═══════════════════════════════════════════════════════════════
-    # 功能卡片区 — Apple 卡片风格
+    # 功能卡片区
     # ═══════════════════════════════════════════════════════════════
 
     features = [
@@ -782,7 +777,7 @@ def show_first_run_setup(parent: tk.Tk) -> None:
         ).pack(fill="x", pady=(1, 0))
 
     # ═══════════════════════════════════════════════════════════════
-    # 提示 — Apple footnote 层级
+    # 提示
     # ═══════════════════════════════════════════════════════════════
 
     tk.Label(
@@ -800,7 +795,7 @@ def show_first_run_setup(parent: tk.Tk) -> None:
     sep.pack(fill="x", padx=tpad)
 
     # ═══════════════════════════════════════════════════════════════
-    # 按钮区 — Apple 主次分明
+    # 按钮区
     # ═══════════════════════════════════════════════════════════════
 
     result = {"configured": False}
