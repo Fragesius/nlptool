@@ -19,6 +19,8 @@ import os
 from html.parser import HTMLParser
 from typing import List, Optional
 
+from core.log import logger
+
 
 # ── 编码检测（无 chardet 依赖）───────────────────────────
 # 优先尝试常见中文编码，再回退到 utf-8/latin-1
@@ -203,6 +205,10 @@ FILETYPES = [
 SUPPORTED_EXTENSIONS = list(_READERS.keys())
 
 
+# 文件大小限制（10 MB），超过则提示分段处理
+_MAX_FILE_SIZE = 10 * 1024 * 1024
+
+
 def read_file(filepath: str) -> str:
     """读取文件内容，返回纯文本。
 
@@ -218,9 +224,19 @@ def read_file(filepath: str) -> str:
     Raises:
         ValueError: 不支持的格式。
         FileNotFoundError: 文件不存在。
+        OSError: 文件过大。
     """
     if not os.path.exists(filepath):
         raise FileNotFoundError(f"文件不存在: {filepath}")
+
+    size = os.path.getsize(filepath)
+    if size > _MAX_FILE_SIZE:
+        size_mb = size / (1024 * 1024)
+        raise OSError(
+            f"文件过大（{size_mb:.1f} MB）。"
+            f"当前限制为 {_MAX_FILE_SIZE // (1024 * 1024)} MB，"
+            f"建议拆分文件或提取其中部分章节后再试。"
+        )
 
     ext = os.path.splitext(filepath)[1].lower()
     reader = _READERS.get(ext)
@@ -233,9 +249,18 @@ def read_file(filepath: str) -> str:
     try:
         return reader(filepath)
     except ImportError as e:
+        logger.error("读取文件 %s 失败（缺少依赖）: %s", filepath, e)
         raise ImportError(f"缺少依赖库：{e}")
+    except Exception as e:
+        logger.error("读取文件 %s 失败: %s", filepath, e, exc_info=True)
+        raise
 
 
+
+
+def _strip_chars(text: str) -> int:
+    """统计不含任何空白字符的字符数。"""
+    return len(re.sub(r"\s", "", text))
 def read_file_with_label(filepath: str) -> tuple:
     """读取文件，返回 (文本内容, 状态标签)。
 
@@ -248,7 +273,7 @@ def read_file_with_label(filepath: str) -> tuple:
     if not text.strip():
         return ("", "⚠ 文件为空或未能提取文本")
 
-    char_count = len(text.replace(" ", "").replace("\n", "").replace("\r", ""))
+    char_count = _strip_chars(text)
     filename = os.path.basename(filepath)
     return (text, f"✅ {filename}  —  {char_count:,} 字符")
 

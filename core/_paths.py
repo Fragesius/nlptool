@@ -29,9 +29,9 @@ def _app_root() -> str:
         # PyInstaller 打包：EXE 所在目录
         return os.path.dirname(sys.executable)
     else:
-        # 开发模式：main.py 的父目录（项目根）
-        # main.py 在 D:\study\nlptool\，所以 os.getcwd() 通常就是项目根
-        return os.getcwd()
+        # 开发模式：以本文件所在目录向上推一级作为项目根
+        # 避免依赖 os.getcwd()，确保从任意目录运行都能找到正确数据路径
+        return os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
 # 可写数据根目录
