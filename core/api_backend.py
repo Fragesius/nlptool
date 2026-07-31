@@ -11,6 +11,7 @@ import os
 from typing import Optional
 
 from core._paths import API_CONFIG_PATH, ensure_data_dirs
+from core.log import logger
 
 CONFIG_PATH = API_CONFIG_PATH
 
@@ -82,4 +83,5 @@ def advanced_analysis(text: str, task: str = "综合分析", lang: Optional[str]
         resp.raise_for_status()
         return resp.json()["choices"][0]["message"]["content"].strip()
     except Exception as e:
+        logger.error("API 调用失败: %s", e, exc_info=True)
         return f"（API 调用失败：{e}）"

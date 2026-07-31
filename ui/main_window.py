@@ -21,7 +21,7 @@ from ui.style import (
     FONT_MONO,
     FONT_SCALE,
 )
-from ui.tabs import BasicTab, SyntaxTab, CompareTab, VizTab, HistoryTab, FingerprintTab
+from ui.tabs import BasicTab, SyntaxTab, CompareTab, VizTab, HistoryTab, FingerprintTab, BatchTab
 
 import ui.style as s
 
@@ -54,11 +54,18 @@ class App:
 
     def _build_header(self) -> None:
         t = get_theme()
+
+        # 顶部强调色条
+        top_accent = tk.Frame(self.root, bg=t.ACCENT, height=3)
+        top_accent.pack(fill="x")
+        self._top_accent = top_accent
+
         bar = tk.Frame(
             self.root, bg=t.CARD,
             highlightthickness=0,
         )
         bar.pack(fill="x")
+        bar._is_card = True
 
         # 底部阴影线
         shadow = tk.Frame(self.root, bg=t.BORDER, height=1)
@@ -66,12 +73,14 @@ class App:
         self._shadow = shadow  # 跟踪用于主题切换
 
         inner = tk.Frame(bar, bg=t.CARD)
+        inner._is_card = True
         header_padx = responsive_padding(24)
-        header_pady = (responsive_padding(14), responsive_padding(8))
+        header_pady = (responsive_padding(14), responsive_padding(10))
         inner.pack(fill="x", padx=header_padx, pady=header_pady)
 
         # 左侧：标题与副标题
         left = tk.Frame(inner, bg=t.CARD)
+        left._is_card = True
         left.pack(side="left")
 
         tk.Label(
@@ -82,33 +91,36 @@ class App:
         ).pack(side="left")
 
         self.subtitle_label = tk.Label(
-            left, text="  汉语 · 英语 · 本地优先 · 可选 AI",
+            left, text="汉语 · 英语 · 本地优先 · 可选 AI",
             font=(FONT, responsive_font_size(FONT_SCALE["footnote"])),
             bg=t.CARD, fg=t.MUTED,
         )
         if not self._compact:
-            self.subtitle_label.pack(side="left", padx=(6, 0))
+            self.subtitle_label.pack(side="left", padx=(10, 0))
         # 紧凑模式: 不显示副标题
 
         # 右侧：后端状态 + 主题切换
         right = tk.Frame(inner, bg=t.CARD)
+        right._is_card = True
         right.pack(side="right")
 
         self.backend_indicator = tk.Label(
-            right, text="", font=(FONT, responsive_font_size(FONT_SCALE["footnote"])),
-            bg=t.CARD, fg=t.SUCCESS,
+            right, text="",
+            font=(FONT, responsive_font_size(FONT_SCALE["footnote"])),
+            bg=t.ACCENT_SOFT, fg=t.SUCCESS,
+            padx=10, pady=2,
         )
-        self.backend_indicator.pack(side="left", padx=(0, 10))
+        self.backend_indicator.pack(side="left", padx=(0, 12))
         self._update_backend_indicator()
 
-        # tk.Button 确保文字在所有系统上可见
+        # 主题切换按钮（圆角药丸风格，tk.Button 确保文字在所有系统上可见）
         self.theme_btn = tk.Button(
             right,
             text="☾ 深色模式",
             font=(FONT, responsive_font_size(FONT_SCALE["footnote"])),
-            bg=t.ACCENT_SOFT, fg=t.ACCENT,
-            relief="flat", padx=12, pady=4,
-            activebackground=t.ACCENT, activeforeground="#ffffff",
+            bg=t.ACCENT, fg="#ffffff",
+            relief="flat", padx=14, pady=4,
+            activebackground=t.ACCENT_HOVER, activeforeground="#ffffff",
             borderwidth=0, cursor="hand2",
             command=self._toggle_theme,
         )
@@ -122,11 +134,11 @@ class App:
         new_name = toggle_theme(self.root)
         t = get_theme()
         if new_name == "dark":
-            self.theme_btn.config(text="☀ 浅色模式", bg=t.ACCENT_SOFT, fg=t.ACCENT,
-                                  activebackground=t.ACCENT, activeforeground="#ffffff")
+            self.theme_btn.config(text="☀ 浅色模式", bg=t.ACCENT, fg="#ffffff",
+                                  activebackground=t.ACCENT_HOVER, activeforeground="#ffffff")
         else:
-            self.theme_btn.config(text="☾ 深色模式", bg=t.ACCENT_SOFT, fg=t.ACCENT,
-                                  activebackground=t.ACCENT, activeforeground="#ffffff")
+            self.theme_btn.config(text="☾ 深色模式", bg=t.ACCENT, fg="#ffffff",
+                                  activebackground=t.ACCENT_HOVER, activeforeground="#ffffff")
         self._apply_theme_to_tk_widgets()
 
     def _apply_theme_to_tk_widgets(self) -> None:
@@ -137,21 +149,34 @@ class App:
                 if isinstance(w, tk.Frame) or isinstance(w, tk.Toplevel):
                     w.configure(bg=t.CARD if hasattr(w, '_is_card') else t.BG)
                 elif isinstance(w, tk.Label):
-                    w.configure(bg=t.CARD if w.master and getattr(w.master, '_is_card', False) else t.BG)
+                    # 后端状态指示器保持药丸底色
+                    if w is getattr(self, 'backend_indicator', None):
+                        w.configure(bg=t.ACCENT_SOFT, fg=t.SUCCESS)
+                    else:
+                        w.configure(bg=t.CARD if w.master and getattr(w.master, '_is_card', False) else t.BG)
                 elif isinstance(w, tk.Text):
                     w.configure(bg=t.INPUT_BG, fg=t.INPUT_FG,
                                 highlightbackground=t.BORDER,
                                 selectbackground=t.SELECT_BG)
             except Exception:
                 pass
+        # 更新顶部强调色条
+        if hasattr(self, '_top_accent'):
+            self._top_accent.configure(bg=t.ACCENT)
         # 更新阴影线
         if hasattr(self, '_shadow'):
             self._shadow.configure(bg=t.BORDER)
+        # 更新主题按钮（保持填充主色）
+        if hasattr(self, 'theme_btn'):
+            self.theme_btn.configure(bg=t.ACCENT, fg="#ffffff",
+                                     activebackground=t.ACCENT_HOVER)
         # 更新菜单
         self._rebuild_menu_colors()
         # 更新状态栏
+        if hasattr(self, '_status_top_line'):
+            self._status_top_line.configure(bg=t.BORDER)
         if hasattr(self, '_status'):
-            self._status.configure(bg=t.ROW_ALT, fg=t.MUTED)
+            self._status.configure(bg=t.CARD, fg=t.MUTED)
 
     def _update_backend_indicator(self) -> None:
         st = analyzer.selfcheck()
@@ -169,6 +194,9 @@ class App:
 
     def _build_menu(self) -> None:
         self._rebuild_menu_colors()
+        # 全局快捷键只绑定一次，避免主题切换时累积
+        self.root.bind("<Control-o>", lambda e: self.open_file())
+        self.root.bind("<Control-s>", lambda e: self.save_file())
 
     def _rebuild_menu_colors(self) -> None:
         t = get_theme()
@@ -203,8 +231,7 @@ class App:
         menubar.add_cascade(label="帮助", menu=mhelp)
 
         self.root.config(menu=menubar)
-        self.root.bind("<Control-o>", lambda e: self.open_file())
-        self.root.bind("<Control-s>", lambda e: self.save_file())
+        # 快捷键只绑定一次，不在主题重建时重复绑定
 
     # ----------------------------------------------------------------- #
     # 主体
@@ -224,8 +251,8 @@ class App:
         left = ttk.LabelFrame(pane, text="📥 输入文本", style="Card.TLabelframe")
 
         ctrl = ttk.Frame(left)
-        ctrl.pack(fill="x", padx=10, pady=(10, 2))
-        ttk.Label(ctrl, text="检测语言：").pack(side="left")
+        ctrl.pack(fill="x", padx=12, pady=(12, 4))
+        ttk.Label(ctrl, text="检测语言：", font=(FONT, responsive_font_size(FONT_SCALE["body"]))).pack(side="left")
         self.lang_var = tk.StringVar(value="自动")
         ttk.Combobox(
             ctrl,
@@ -246,7 +273,17 @@ class App:
             selectbackground=t.SELECT_BG, selectforeground=t.TEXT,
             insertbackground=t.TEXT,
         )
-        self.text.pack(fill="both", expand=True, padx=10, pady=(4, 10))
+        self.text.pack(fill="both", expand=True, padx=12, pady=(4, 6))
+
+        # 输入区底部提示
+        self._input_hint = tk.Label(
+            left,
+            text="支持 txt / docx / pdf / html / md / rtf 等格式，可拖放或从菜单打开",
+            font=(FONT, responsive_font_size(FONT_SCALE["caption"])),
+            bg=t.CARD, fg=t.MUTED,
+            anchor="w",
+        )
+        self._input_hint.pack(fill="x", padx=12, pady=(0, 8))
 
         # 注册主题回调
         def _on_text_theme_change(th):
@@ -261,11 +298,12 @@ class App:
                 self.text.config(fg=th.MUTED)
             else:
                 self.text.config(fg=th.TEXT)
+            self._input_hint.config(bg=th.CARD, fg=th.MUTED)
         register_theme_callback(_on_text_theme_change)
 
         # Placeholder 效果
         self._placeholder_shown = True
-        self._placeholder_text = "在此粘贴或输入待分析文本……支持中文、英文及混合文本"
+        self._placeholder_text = "在此粘贴或输入待分析文本……\n支持中文、英文及混合文本，也可从菜单「文件 → 打开」导入文档"
         self.text.insert("end", self._placeholder_text)
         self.text.config(fg=t.MUTED)
         self.text.bind("<FocusIn>", self._on_text_focus_in)
@@ -285,6 +323,7 @@ class App:
         self.syntax_tab = SyntaxTab(nb, self)
         self.compare_tab = CompareTab(nb, self)
         self.viz_tab = VizTab(nb, self)
+        self.batch_tab = BatchTab(nb, self)
         self.history_tab = HistoryTab(nb, self)
         self.fingerprint_tab = FingerprintTab(nb, self)
 
@@ -294,6 +333,7 @@ class App:
             nb.add(self.syntax_tab, text="  🔍 句法  ")
             nb.add(self.compare_tab, text="  ⚖ 对比  ")
             nb.add(self.viz_tab, text="  📈 可视化  ")
+            nb.add(self.batch_tab, text="  📁 批量  ")
             nb.add(self.history_tab, text="  📜 历史  ")
             nb.add(self.fingerprint_tab, text="  🔬 指纹  ")
         else:
@@ -301,6 +341,7 @@ class App:
             nb.add(self.syntax_tab, text="  🔍 句法/语义  ")
             nb.add(self.compare_tab, text="  ⚖ 对比分析  ")
             nb.add(self.viz_tab, text="  📈 可视化  ")
+            nb.add(self.batch_tab, text="  📁 批量处理  ")
             nb.add(self.history_tab, text="  📜 历史记录  ")
             nb.add(self.fingerprint_tab, text="  🔬 语言指纹  ")
 
@@ -323,12 +364,17 @@ class App:
 
     def _build_statusbar(self) -> None:
         t = get_theme()
+
+        # 状态栏顶部细线
+        self._status_top_line = tk.Frame(self.root, bg=t.BORDER, height=1)
+        self._status_top_line.pack(fill="x", side="bottom")
+
         self._status = tk.Label(
             self.root,
             text="就绪  —  输入文本后点击分析按钮开始",
             font=(FONT, responsive_font_size(FONT_SCALE["footnote"])),
-            bg=t.ROW_ALT, fg=t.MUTED,
-            anchor="w", padx=16, pady=6,
+            bg=t.CARD, fg=t.MUTED,
+            anchor="w", padx=16, pady=8,
         )
         self._status.pack(fill="x", side="bottom")
         self._theme_widgets.append(self._status)
@@ -445,7 +491,7 @@ class App:
                 m = re.search(r"\x00\[(\d+)\]\x00", nearby)
                 if m:
                     si = int(m.group(1)) - 1
-                    self.syntax_tab.expand_sentence(si)
+                    self.syntax_tab.show_sentence(si)
             except Exception:
                 pass
 
@@ -467,21 +513,25 @@ class App:
             self._mark_modified_bound = True
 
     def clear_sentence_marks(self) -> None:
-        """删除所有句子序号标记（真正从文本中移除字符）。"""
+        """删除所有句子序号标记（真正从文本中移除字符）。
+
+        性能优化：用 re.finditer 批量查找所有标记位置，从后往前一次性删除，
+        避免 O(n²) 的 while True 循环。
+        """
         import re
-        # 避免递归：标记正在清除中
         self._clearing_marks = True
         try:
-            while True:
-                content = self.text.get("1.0", "end-1c")
-                m = re.search(r"\x00\[\d+\]\x00", content)
-                if not m:
-                    break
+            content = self.text.get("1.0", "end-1c")
+            # 批量查找所有标记，从后往前删除避免偏移
+            matches = list(re.finditer(r"\x00\[\d+\]\x00", content))
+            for m in reversed(matches):
                 start = self.text.index(f"1.0+{m.start()}c")
                 end = self.text.index(f"1.0+{m.end()}c")
                 self.text.delete(start, end)
             self.text.tag_delete("sent_marker")
             self.text.edit_modified(False)
+            # 视觉反馈：状态栏提示
+            self.set_status("句法标记已清除")
         finally:
             self._clearing_marks = False
 
@@ -631,7 +681,7 @@ class App:
     def about(self) -> None:
         messagebox.showinfo(
             "关于",
-            "📝 汉英 NLP 分析工具  V1.1\n"
+            "📝 汉英 NLP 分析工具  V1.2.0\n"
             "Python + Tkinter · 本地与云端混合\n\n"
             "作者：Fragesius\n"
             "联系方式：fragesius@gmail.com\n\n"

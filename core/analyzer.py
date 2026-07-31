@@ -16,6 +16,8 @@ from collections import Counter
 from dataclasses import dataclass, field
 from typing import List, Optional
 
+from core.log import logger
+
 # --------------------------------------------------------------------------- #
 # 数据结构
 # --------------------------------------------------------------------------- #
@@ -345,7 +347,8 @@ def _get_jieba():
 
             _jieba = jieba
             _jieba_pos = pseg
-        except ImportError:
+        except ImportError as e:
+            logger.warning("jieba 未安装，中文分词将回退到字符切分: %s", e)
             _jieba = False
     return _jieba, _jieba_pos
 
@@ -370,7 +373,8 @@ def _get_spacy(lang: str = "en"):
                 _spacy_nlp[lang] = spacy.load(model_dir)
             else:
                 _spacy_nlp[lang] = spacy.load(model)
-        except Exception:
+        except Exception as e:
+            logger.warning("spaCy 模型 %s 加载失败: %s", model, e)
             _spacy_nlp[lang] = False
     return _spacy_nlp[lang]
 
@@ -461,16 +465,18 @@ def tokenize(text: str, lang: Optional[str] = None) -> List[Token]:
         return tokenize_zh(text)
     if lang == "en":
         return tokenize_en(text)
-    # mixed：按 CJK / 拉丁片段分别处理
+    # mixed：按 CJK / 拉丁片段分别处理（含数字）
     tokens: List[Token] = []
-    # 用正则切出中文段与英文段
-    for seg in re.findall(r"[一-鿿]+|[A-Za-z][A-Za-z\s.,;:!?'\"-]*", text):
+    # 用正则切出中文段、英文段与数字段
+    for seg in re.findall(r"[一-鿿]+|[A-Za-z][A-Za-z\s.,;:!?'\"-]*|\d+(?:\.\d+)*", text):
         if _CJK_RE.search(seg):
             tokens.extend(tokenize_zh(seg))
+        elif seg.strip().replace(".", "").isdigit():
+            # 纯数字片段直接作为词元，避免被英文分词器丢弃
+            tokens.append(Token(text=seg.strip(), pos="NUM", lemma=seg.strip(), lang="en"))
         elif seg.strip():
             tokens.extend(tokenize_en(seg))
     return tokens
-
 
 # --------------------------------------------------------------------------- #
 # 基础分析
@@ -503,7 +509,7 @@ def analyze_basic(text: str, lang: Optional[str] = None) -> BasicResult:
         tokens=tokens,
         sentences=sentences,
         char_count=len(text),
-        char_count_no_space=len(text.replace(" ", "").replace("\n", "")),
+        char_count_no_space=len(re.sub(r"\s", "", text)),
         word_count=len(tokens),
         sentence_count=len(sentences),
         freq=freq,
@@ -673,6 +679,9 @@ def sentiment(text: str, lang: Optional[str] = None) -> dict:
             if lex is not None:
                 score = lex
                 raw = (lex + 1) / 2
+            else:
+                score = 0.0
+                raw = 0.5  # 中性默认值，避免返回 None
     else:
         try:
             import nltk  # type: ignore
@@ -689,6 +698,9 @@ def sentiment(text: str, lang: Optional[str] = None) -> dict:
             if lex is not None:
                 score = lex
                 raw = lex
+            else:
+                score = 0.0
+                raw = 0.0  # 中性默认值，避免返回 None
 
     if score > 0.15:
         label = "正向"

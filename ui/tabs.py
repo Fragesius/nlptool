@@ -6,10 +6,14 @@ import tkinter as tk
 from tkinter import ttk, scrolledtext, messagebox, filedialog
 from typing import Optional
 
+import matplotlib.pyplot as plt
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolbar2Tk
 from matplotlib.figure import Figure
 
-from core import analyzer, comparison, api_backend, history
+import os
+
+from core import analyzer, comparison, api_backend, history, linguistic_fingerprint, batch, file_io
+from ui.async_runner import TaskRunner
 from ui.style import (
     get_theme, register_theme_callback, is_compact_mode,
     get_screen_size, responsive_font_size,
@@ -34,6 +38,8 @@ def clear_widget(w: tk.Widget) -> None:
 
 def embed_figure(parent: tk.Widget, fig: Figure) -> None:
     """将 matplotlib Figure 嵌入可滚动的容器中。"""
+    # 关闭所有旧 Figure，防止内存泄漏
+    plt.close("all")
     clear_widget(parent)
     t = get_theme()
 
@@ -235,6 +241,14 @@ class _SentenceCard:
         self._content.pack_forget()
         self._toggle_btn.config(text="▶")
         self._expanded = False
+        # 关闭 Figure 释放内存
+        if self._fig is not None:
+            try:
+                plt.close(self._fig)
+            except Exception:
+                pass
+            self._fig = None
+            self._canvas = None
 
     def _draw_tree(self) -> None:
         from viz.plots import make_dependency_graph
@@ -260,6 +274,12 @@ class _SentenceCard:
 
     def update_theme(self, dark_mode: bool) -> None:
         """主题切换时重新绘制树图。"""
+        # 先关闭旧 Figure，避免内存泄漏
+        if self._fig is not None:
+            try:
+                plt.close(self._fig)
+            except Exception:
+                pass
         if self._expanded and self._fig is not None:
             from viz.plots import make_dependency_graph
             clear_widget(self._content)
@@ -293,11 +313,15 @@ class BasicTab(ttk.Frame):
     def __init__(self, master, app):
         super().__init__(master)
         self.app = app
+        self._runner = TaskRunner(self)
 
         ctrl = ttk.Frame(self)
         ctrl.pack(fill="x", padx=10, pady=(10, 4))
         ttk.Button(ctrl, text="▶ 运行基础分析", style="Accent.TButton",
                    command=self.run).pack(side="left")
+        self.export_btn = ttk.Button(ctrl, text="📤 导出结果", command=self.export,
+                                      state="disabled")
+        self.export_btn.pack(side="left", padx=(8, 0))
 
         # 摘要卡片（紧凑模式下减少高度）
         card = ttk.LabelFrame(self, text="📋 统计摘要", style="Card.TLabelframe")
@@ -320,6 +344,32 @@ class BasicTab(ttk.Frame):
         )
         self.freq_text = make_labeled_text(right, "📊 词频 Top 30")
 
+        # ── 关键词上下文 KWIC ──
+        kwic_frame = ttk.LabelFrame(self, text="🔍 关键词上下文 (KWIC)", style="Card.TLabelframe")
+        kwic_frame.pack(fill="both", expand=False, padx=10, pady=(4, 8))
+
+        kwic_ctrl = ttk.Frame(kwic_frame)        kwic_ctrl.pack(fill="x", padx=8, pady=(8, 4))
+        ttk.Label(kwic_ctrl, text="检索词：").pack(side="left")
+        self.kwic_entry = ttk.Entry(kwic_ctrl, width=24)
+        self.kwic_entry.pack(side="left", padx=(4, 8))
+        ttk.Label(kwic_ctrl, text="窗口：").pack(side="left")
+        self.kwic_window = tk.Spinbox(kwic_ctrl, from_=2, to=12, width=4)
+        self.kwic_window.delete(0, "end")
+        self.kwic_window.insert(0, "6")
+        self.kwic_window.pack(side="left", padx=(4, 8))
+        self.kwic_regex = tk.BooleanVar(value=False)
+        ttk.Checkbutton(kwic_ctrl, text="正则", variable=self.kwic_regex).pack(side="left", padx=(0, 8))
+        self.kwic_case = tk.BooleanVar(value=False)
+        ttk.Checkbutton(kwic_ctrl, text="区分大小写", variable=self.kwic_case).pack(side="left", padx=(0, 8))
+        ttk.Button(kwic_ctrl, text="🔍 搜索", command=self.run_kwic).pack(side="left")
+        self.kwic_export_btn = ttk.Button(kwic_ctrl, text="📤 导出 KWIC", command=self.export_kwic,
+                                           state="disabled")
+        self.kwic_export_btn.pack(side="left", padx=(8, 0))
+
+        self.kwic_text = make_labeled_text(kwic_frame, "")
+        self.kwic_text.configure(height=8)
+        self._kwic_last: list = []
+
         self._last: Optional[analyzer.BasicResult] = None
 
     def run(self) -> None:
@@ -327,14 +377,21 @@ class BasicTab(ttk.Frame):
         if not text.strip():
             messagebox.showinfo("提示", "请先输入待分析文本。")
             return
+        if self._runner.is_running():
+            return
+
         lang = self.app.get_lang()
         self.app.set_status("正在执行基础分析……")
-        try:
-            res = analyzer.analyze_basic(text, lang)
-        except Exception as e:
-            messagebox.showerror("错误", f"分析失败：{e}")
-            self.app.set_status("分析失败")
-            return
+        self._runner.run(
+            analyzer.analyze_basic,
+            args=(text, lang),
+            on_success=self._on_result,
+            on_error=self._on_error,
+            title="基础分析",
+            message="正在分词、统计词频与词性分布...",
+        )
+
+    def _on_result(self, res: analyzer.BasicResult) -> None:
         self._last = res
 
         self.summary.delete("1.0", "end")
@@ -350,10 +407,54 @@ class BasicTab(ttk.Frame):
         for w, c in res.freq.most_common(30):
             self.freq_text.insert("end", f"{w:<24s}{c}\n")
 
+        self.export_btn.configure(state="normal")
         self._save_history(res)
         self.app.set_status(
             f"基础分析完成 — {res.word_count} 词元, {res.sentence_count} 句子"
         )
+
+    def _on_error(self, e: Exception) -> None:
+        messagebox.showerror("错误", f"分析失败：{e}")
+        self.app.set_status("分析失败")
+
+    def export(self) -> None:
+        if self._last is None:
+            return
+        from core.export import export_basic_result
+        export_basic_result(self._last, self.winfo_toplevel())
+
+    def run_kwic(self) -> None:
+        keyword = self.kwic_entry.get().strip()
+        if not keyword:
+            messagebox.showinfo("提示", "请输入检索词。")
+            return
+        text = self.app.get_text()
+        if not text.strip():
+            messagebox.showinfo("提示", "请先输入待分析文本。")
+            return
+        try:
+            window = int(self.kwic_window.get())
+        except ValueError:
+            window = 6
+        from core.concordance import kwic, kwic_summary
+        lines = kwic(
+            text, keyword,
+            lang=self.app.get_lang(),
+            window=window,
+            case_sensitive=self.kwic_case.get(),
+            regex=self.kwic_regex.get(),
+        )
+        self._kwic_last = lines
+        self.kwic_text.delete("1.0", "end")
+        self.kwic_text.insert("end", kwic_summary(lines))
+        self.kwic_export_btn.configure(state="normal" if lines else "disabled")
+        self.app.set_status(f"KWIC 搜索完成 — {len(lines)} 条匹配")
+
+    def export_kwic(self) -> None:
+        if not self._kwic_last:
+            return
+        from core.export import export_kwic_result
+        export_kwic_result(self._kwic_last, self.winfo_toplevel())
 
     def _save_history(self, res: analyzer.BasicResult) -> None:
         try:
@@ -386,12 +487,17 @@ class SyntaxTab(ttk.Frame):
     def __init__(self, master, app):
         super().__init__(master)
         self.app = app
+        self._runner = TaskRunner(self)
+        self._last: Optional[analyzer.SyntaxResult] = None
 
         ctrl = ttk.Frame(self)
         ctrl.pack(fill="x", padx=10, pady=(10, 4))
         ttk.Button(ctrl, text="▶ 运行句法/语义分析", style="Accent.TButton",
                    command=self.run_local).pack(side="left")
         ttk.Button(ctrl, text="🤖 AI 高级分析", command=self.run_api).pack(side="left", padx=8)
+        self.export_btn = ttk.Button(ctrl, text="📤 导出结果", command=self.export,
+                                      state="disabled")
+        self.export_btn.pack(side="left", padx=(8, 0))
 
         nb = ttk.Notebook(self, style="Sub.TNotebook")
         nb.pack(fill="both", expand=True, padx=10, pady=4)
@@ -410,43 +516,10 @@ class SyntaxTab(ttk.Frame):
         self.ner_text = make_labeled_text(self.ner_tab, "命名实体  —  实体 / 类型")
         self.kw_text = make_labeled_text(self.kw_tab, "关键词  —  词语 / 权重")
 
-        # ── 依存句法：可折叠句子卡片 ──
-        dep_ctrl = ttk.Frame(self.dep_tab)
-        dep_ctrl.pack(fill="x", padx=8, pady=(6, 2))
-        ttk.Button(dep_ctrl, text="展开全部", command=self._expand_all_cards).pack(
-            side="left", padx=(0, 4))
-        ttk.Button(dep_ctrl, text="折叠全部", command=self._collapse_all_cards).pack(
-            side="left")
-
-        # 可滚动卡片容器
-        self._dep_canvas = tk.Canvas(self.dep_tab, highlightthickness=0, bd=0)
-        dep_sb = ttk.Scrollbar(self.dep_tab, orient="vertical",
-                                command=self._dep_canvas.yview)
-        self._dep_canvas.configure(yscrollcommand=dep_sb.set)
-
-        self._dep_cards_frame = ttk.Frame(self._dep_canvas)
-        self._dep_cards_id = self._dep_canvas.create_window(
-            (0, 0), window=self._dep_cards_frame, anchor="nw")
-
-        self._dep_cards_frame.bind("<Configure>",
-            lambda _e: self._dep_canvas.configure(
-                scrollregion=self._dep_canvas.bbox("all")))
-        self._dep_canvas.bind("<Configure>",
-            lambda e: self._dep_canvas.itemconfig(
-                self._dep_cards_id, width=e.width))
-
-        # 鼠标滚轮滚动
-        def _on_mousewheel(event):
-            self._dep_canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
-        self._dep_canvas.bind("<Enter>",
-            lambda _e: self._dep_canvas.bind_all("<MouseWheel>", _on_mousewheel))
-        self._dep_canvas.bind("<Leave>",
-            lambda _e: self._dep_canvas.unbind_all("<MouseWheel>"))
-
-        self._dep_canvas.pack(side="left", fill="both", expand=True)
-        dep_sb.pack(side="right", fill="y")
-
-        self._dep_cards: list[_SentenceCard] = []
+        # ── 依存句法：文字列表（可视化请在「可视化」标签查看树图）──
+        self.dep_text = make_labeled_text(            self.dep_tab,            "依存关系  —  词元(词性)  ──依存──▶  head(head词性)"
+        )
+        self._dep_sentences: list[list[dict]] = []
 
         self.sent_text = make_labeled_text(self.sent_tab, "情感得分  —  -1 负向  ~  1 正向")
         self.api_text = make_labeled_text(self.api_tab, "AI 返回结果")
@@ -473,15 +546,22 @@ class SyntaxTab(ttk.Frame):
         if not text.strip():
             messagebox.showinfo("提示", "请先输入待分析文本。")
             return
-        lang = self.app.get_lang()
-        self.app.set_status("正在执行句法/语义分析……")
-        try:
-            res = analyzer.analyze_syntax(text, lang)
-        except Exception as e:
-            messagebox.showerror("错误", f"分析失败：{e}")
-            self.app.set_status("分析失败")
+        if self._runner.is_running():
             return
 
+        lang = self.app.get_lang()
+        self.app.set_status("正在执行句法/语义分析……")
+        self._runner.run(
+            analyzer.analyze_syntax,
+            args=(text, lang),
+            on_success=lambda res: self._on_local_result(res, text, lang),
+            on_error=self._on_error,
+            title="句法/语义分析",
+            message="正在执行命名实体识别、关键词提取、依存句法分析与情感分析...",
+        )
+
+    def _on_local_result(self, res: analyzer.SyntaxResult, text: str, lang) -> None:
+        self._last = res
         t = get_theme()
 
         # NER
@@ -497,12 +577,12 @@ class SyntaxTab(ttk.Frame):
         for w, weight in res.keywords:
             self.kw_text.insert("end", f"{w:<24s}{weight:.4f}\n")
 
-        # 依存句法 — 可折叠句子卡片
-        clear_widget(self._dep_cards_frame)
-        self._dep_cards.clear()
-        # 按 sent_id 分组
+        # 依存句法 — 文字列表
+        self._dep_sentences.clear()
+        self.dep_text.delete("1.0", "end")
         sentences: list[list[dict]] = []
         if res.dependencies:
+            # 按 sent_id 分组
             cur_sid, cur = None, []
             for d in res.dependencies:
                 sid = d.get("sent_id", 0)
@@ -514,15 +594,24 @@ class SyntaxTab(ttk.Frame):
                     cur.append(d)
             if cur:
                 sentences.append(cur)
+            self._dep_sentences = sentences
 
             for si, sent_deps in enumerate(sentences):
-                card = _SentenceCard(self._dep_cards_frame, si, sent_deps)
-                self._dep_cards.append(card)
+                self.dep_text.insert("end", f"\n【句子 S{si + 1}】\n")
+                for d in sent_deps:
+                    dep = d.get("dep", "")
+                    if dep == "ROOT":
+                        self.dep_text.insert(
+                            "end",
+                            f"  {d['text']:<12s}({d.get('pos', ''):<6s})  ──ROOT──▶  [根节点]\n",
+                        )
+                    else:
+                        self.dep_text.insert(                            "end",
+                            f"  {d['text']:<12s}({d.get('pos', ''):<6s})  ──{dep:<12s}──▶  "
+                            f"{d.get('head_text', ''):<12s}({d.get('head_pos', '')})\n",
+                        )
         else:
-            tk.Label(self._dep_cards_frame,
-                     text=_dep_status_msg(lang),
-                     font=(FONT, responsive_font_size(FONT_SCALE["body"]))).pack(
-                padx=20, pady=20)
+            self.dep_text.insert("end", _dep_status_msg(lang))
 
         # 情感
         self.sent_text.delete("1.0", "end")
@@ -531,6 +620,8 @@ class SyntaxTab(ttk.Frame):
         self.sent_text.insert("end", f"情感倾向：{sent['label']} {emoji}\n")
         self.sent_text.insert("end", f"得分：{sent['score']:.4f}（-1 负向 ~ 1 正向）\n")
         self.sent_text.insert("end", f"原始值：{sent['raw']}\n")
+
+        self.export_btn.configure(state="normal")
 
         # 保存历史
         try:
@@ -562,22 +653,25 @@ class SyntaxTab(ttk.Frame):
         except Exception:
             pass
 
-    def _expand_all_cards(self) -> None:
-        for c in self._dep_cards:
-            if not c._expanded:
-                c._expand()
+    def _on_error(self, e: Exception) -> None:
+        messagebox.showerror("错误", f"分析失败：{e}")
+        self.app.set_status("分析失败")
 
-    def _collapse_all_cards(self) -> None:
-        for c in self._dep_cards:
-            if c._expanded:
-                c._collapse()
-
-    def expand_sentence(self, index: int) -> None:
-        """公开方法：展开指定句子编号的卡片。"""
-        if 0 <= index < len(self._dep_cards):
-            card = self._dep_cards[index]
-            if not card._expanded:
-                card._expand()
+    def show_sentence(self, index: int) -> None:
+        """在依存句法文字列表中定位到指定句子（点击输入区标记时调用）。"""
+        if not self._dep_sentences or not (0 <= index < len(self._dep_sentences)):
+            return
+        target = f"【句子 S{index + 1}】"
+        pos = self.dep_text.search(target, "1.0", "end")
+        if pos:
+            try:
+                self.master.select(self)
+            except Exception:
+                pass
+            self.dep_text.see(pos)
+            self.dep_text.tag_add("highlight", f"{pos} linestart", f"{pos} lineend+1c")
+            self.dep_text.tag_configure("highlight", background=get_theme().ACCENT_SOFT)
+            self.after(1200, lambda: self.dep_text.tag_remove("highlight", "1.0", "end"))
 
     def run_api(self) -> None:
         text = self.app.get_text()
@@ -588,15 +682,32 @@ class SyntaxTab(ttk.Frame):
             if messagebox.askyesno("API 未配置", "尚未配置 API，是否现在配置？"):
                 self.app.open_api_settings()
             return
+        if self._runner.is_running():
+            return
+
         self.api_text.delete("1.0", "end")
         self.api_text.insert("end", "⏳ 正在调用 API，请稍候……\n")
-        self.update_idletasks()
         self.app.set_status("正在调用 AI API……")
         lang = self.app.get_lang()
-        result = api_backend.advanced_analysis(text, self.api_task.get(), lang)
+        self._runner.run(
+            api_backend.advanced_analysis,
+            args=(text, self.api_task.get(), lang),
+            on_success=self._on_api_result,
+            on_error=self._on_error,
+            title="AI 高级分析",
+            message="正在调用在线 API，请稍候...",
+        )
+
+    def _on_api_result(self, result: str) -> None:
         self.api_text.delete("1.0", "end")
         self.api_text.insert("end", result)
         self.app.set_status("AI 分析完成")
+
+    def export(self) -> None:
+        if self._last is None:
+            return
+        from core.export import export_syntax_result
+        export_syntax_result(self._last, self.winfo_toplevel())
 
 
 # --------------------------------------------------------------------------- #
@@ -608,17 +719,17 @@ class CompareTab(ttk.Frame):
     def __init__(self, master, app):
         super().__init__(master)
         self.app = app
+        self._runner = TaskRunner(self)
+        self._last_readability = None
+        self._last_alignment = None
 
         ctrl = ttk.Frame(self)
         ctrl.pack(fill="x", padx=10, pady=(10, 4))
         ttk.Button(ctrl, text="▶ 分析可读性", style="Accent.TButton",
                    command=self.run_readability).pack(side="left")
-        ttk.Label(
-            ctrl,
-            text="  |  中英对齐：分别粘贴中英文 → 点击「对齐」",
-            font=(FONT, responsive_font_size(FONT_SCALE["footnote"])),
-            foreground=s.MUTED,
-        ).pack(side="left", padx=8)
+        self.export_read_btn = ttk.Button(ctrl, text="📤 导出可读性", command=self.export_readability,
+                                           state="disabled")
+        self.export_read_btn.pack(side="left", padx=(8, 0))
 
         # 双输入框
         pane = ttk.PanedWindow(self, orient="horizontal")
@@ -643,7 +754,10 @@ class CompareTab(ttk.Frame):
         ctrl2 = ttk.Frame(self)
         ctrl2.pack(fill="x", padx=10, pady=2)
         ttk.Button(ctrl2, text="🔗 对齐中英句子", command=self.run_align).pack(side="left")
-        ttk.Button(ctrl2, text="📥 从主输入框填入", command=self.fill_from_main).pack(side="left", padx=8)
+        self.export_align_btn = ttk.Button(ctrl2, text="📤 导出对齐", command=self.export_alignment,
+                                            state="disabled")
+        self.export_align_btn.pack(side="left", padx=(8, 0))
+        ttk.Button(ctrl2, text="📥 从主输入框填入", command=self.fill_from_main).pack(side="left", padx=(8, 0))
 
         self.out = make_labeled_text(self, "📋 结果输出")
 
@@ -659,17 +773,32 @@ class CompareTab(ttk.Frame):
         if not text.strip():
             messagebox.showinfo("提示", "请先输入待分析文本。")
             return
+        if self._runner.is_running():
+            return
+
         lang = self.app.get_lang()
         self.app.set_status("正在计算可读性……")
-        try:
-            res = comparison.readability_for(text, lang)
-        except Exception as e:
-            messagebox.showerror("错误", f"分析失败：{e}")
-            self.app.set_status("分析失败")
-            return
+        self._runner.run(
+            comparison.readability_for,
+            args=(text, lang),
+            on_success=self._on_readability_result,
+            on_error=self._on_error,
+            title="可读性分析",
+            message="正在计算可读性指标...",
+        )
+
+    def _on_readability_result(self, res) -> None:
+        self._last_readability = res
         self.out.delete("1.0", "end")
         self.out.insert("end", res.summary() + "\n")
+        self.export_read_btn.configure(state="normal")
         self.app.set_status("可读性分析完成")
+
+    def export_readability(self) -> None:
+        if self._last_readability is None:
+            return
+        from core.export import export_readability_result
+        export_readability_result(self._last_readability, self.winfo_toplevel())
 
     def fill_from_main(self) -> None:
         text = self.app.get_text()
@@ -687,13 +816,37 @@ class CompareTab(ttk.Frame):
         if not zh or not en:
             messagebox.showinfo("提示", "请在中英文框中均输入文本。")
             return
+        if self._runner.is_running():
+            return
+
         self.app.set_status("正在对齐中英句子……")
-        res = comparison.align_zh_en(zh, en)
+        self._runner.run(
+            comparison.align_zh_en,
+            args=(zh, en),
+            on_success=self._on_alignment_result,
+            on_error=self._on_error,
+            title="中英对齐",
+            message="正在按句子序号启发式对齐...",
+        )
+
+    def _on_alignment_result(self, res) -> None:
+        self._last_alignment = res
         self.out.delete("1.0", "end")
         self.out.insert("end", res.summary() + "\n\n")
         for i, (z, e) in enumerate(res.pairs, 1):
             self.out.insert("end", f"[{i}] {z}\n    {e}\n\n")
+        self.export_align_btn.configure(state="normal")
         self.app.set_status(f"对齐完成 — {len(res.pairs)} 句对")
+
+    def export_alignment(self) -> None:
+        if self._last_alignment is None:
+            return
+        from core.export import export_alignment_result
+        export_alignment_result(self._last_alignment, self.winfo_toplevel())
+
+    def _on_error(self, e: Exception) -> None:
+        messagebox.showerror("错误", f"分析失败：{e}")
+        self.app.set_status("分析失败")
 
 
 # --------------------------------------------------------------------------- #
@@ -825,6 +978,7 @@ class VizTab(ttk.Frame):
     def __init__(self, master, app):
         super().__init__(master)
         self.app = app
+        self._runner = TaskRunner(self)
         from viz import plots
         self.plots = plots
 
@@ -848,8 +1002,10 @@ class VizTab(ttk.Frame):
         self._syntax: Optional[analyzer.SyntaxResult] = None
         # 分析结果缓存：相同 (text, lang) 不重复分析（避免连续点击图表按钮时重复跑 spaCy）
         self._cache_key: Optional[tuple] = None
+        self._pending_kind: Optional[str] = None
 
     def _ensure_data(self) -> bool:
+        """检查输入并返回是否需要重新分析。"""
         text = self.app.get_text()
         if not text.strip():
             messagebox.showinfo("提示", "请先输入待分析文本。")
@@ -860,18 +1016,45 @@ class VizTab(ttk.Frame):
                 and self._basic is not None
                 and self._syntax is not None):
             return True
-        try:
-            self._basic = analyzer.analyze_basic(text, lang)
-            self._syntax = analyzer.analyze_syntax(text, lang)
-            self._cache_key = cache_key
-        except Exception as e:
-            messagebox.showerror("错误", f"分析失败：{e}")
-            return False
-        return True
+        return True  # 需要分析，但交给后台线程执行
 
     def draw(self, kind: str) -> None:
         if not self._ensure_data():
             return
+        if self._runner.is_running():
+            return
+
+        self._pending_kind = kind
+        text = self.app.get_text()
+        lang = self.app.get_lang()
+        cache_key = (text, lang)
+        if self._cache_key == cache_key and self._basic and self._syntax:
+            # 命中缓存，直接绘制
+            self._draw(kind)
+            return
+
+        self.app.set_status("正在准备可视化数据……")
+        self._runner.run(
+            self._analyze_for_viz,
+            args=(text, lang),
+            on_success=lambda pair: self._on_data_ready(pair, kind),
+            on_error=self._on_error,
+            title="可视化分析",
+            message="正在执行基础分析与句法分析，为图表准备数据...",
+        )
+
+    def _analyze_for_viz(self, text: str, lang) -> tuple:
+        """后台线程执行：返回 (basic, syntax)。"""
+        basic = analyzer.analyze_basic(text, lang)
+        syntax = analyzer.analyze_syntax(text, lang)
+        return basic, syntax
+
+    def _on_data_ready(self, pair: tuple, kind: str) -> None:
+        self._basic, self._syntax = pair
+        self._cache_key = (self.app.get_text(), self.app.get_lang())
+        self._draw(kind)
+
+    def _draw(self, kind: str) -> None:
         self.app.set_status(f"正在生成图表: {kind}……")
         t = get_theme()
         dark = t.name == "dark"
@@ -895,6 +1078,10 @@ class VizTab(ttk.Frame):
         except Exception as e:
             messagebox.showerror("错误", f"绘图失败：{e}")
             self.app.set_status(f"绘图失败: {kind}")
+
+    def _on_error(self, e: Exception) -> None:
+        messagebox.showerror("错误", f"分析失败：{e}")
+        self.app.set_status("分析失败")
 
 
 # --------------------------------------------------------------------------- #
@@ -997,7 +1184,7 @@ class _InputRow:
         def _confirm(event=None):
             text = box.get("1.0", "end-1c").strip()
             self._text = text
-            count = len(text.replace(" ", "").replace("\n", "").replace("\r", ""))
+            count = len(re.sub(r"\s", "", text))
             warn = ""
             if self.min_chars > 0 and 0 < count < self.min_chars:
                 warn = f"  ⚠ 不足 {self.min_chars} 字符"
@@ -1035,7 +1222,7 @@ class _InputRow:
     def set_text(self, text: str, label: str = "") -> None:
         """直接设置文本（供程序调用）。"""
         self._text = text
-        count = len(text.replace(" ", "").replace("\n", "").replace("\r", ""))
+        count = len(re.sub(r"\s", "", text))
         self.status_label.config(
             text=label if label else f"已设置  —  {count:,} 字符",
             foreground=s.SUCCESS,
@@ -1133,10 +1320,16 @@ class FingerprintTab(ttk.Frame):
         # ── 控制栏 ──
         ctrl = ttk.Frame(self)
         ctrl.pack(fill="x", padx=10, pady=(10, 4))
-        ttk.Button(
+        self.run_btn = ttk.Button(
             ctrl, text="▶ 运行语言指纹分析", style="Accent.TButton",
             command=self.run,
-        ).pack(side="left")
+        )
+        self.run_btn.pack(side="left")
+        self.export_btn = ttk.Button(ctrl, text="📤 导出报告", command=self.export,
+                                      state="disabled")
+        self.export_btn.pack(side="left", padx=(8, 0))
+        self._runner = TaskRunner(self)
+        self._last: Optional[linguistic_fingerprint.FingerprintResult] = None
         ttk.Label(
             ctrl,
             text="  |  加载文件或粘贴文本，支持 txt / docx / pdf / html / rtf 等格式",
@@ -1206,7 +1399,7 @@ class FingerprintTab(ttk.Frame):
         )
 
         # 注册主题
-        _apply_text_theme(self.results_text, get_theme().name)
+        _apply_text_theme(self.results_text, get_theme())
 
         def on_theme_change(theme):
             _apply_text_theme(self.results_text, theme)
@@ -1214,10 +1407,15 @@ class FingerprintTab(ttk.Frame):
         register_theme_callback(on_theme_change)
 
     # ── 状态更新 ──
+    @staticmethod
+    def _count_chars(text: str) -> int:
+        """统计不含空白字符的字符数。"""
+        return len(re.sub(r"\s", "", text))
+
     def _update_status(self) -> None:
         """输入变化时更新状态栏。"""
-        a_count = len(self.row_a.get_text().replace(" ", "").replace("\n", "").replace("\r", ""))
-        b_count = len(self.row_b.get_text().replace(" ", "").replace("\n", "").replace("\r", ""))
+        a_count = self._count_chars(self.row_a.get_text())
+        b_count = self._count_chars(self.row_b.get_text())
         n_controls = sum(1 for r in self.control_rows if r.get_text().strip())
         ready = a_count >= 3000 and b_count > 0 and n_controls >= 1
         status = "✅ 就绪，可以运行" if ready else "⏳ 等待更多输入"
@@ -1246,16 +1444,19 @@ class FingerprintTab(ttk.Frame):
 
     # ── 运行分析 ──
     def run(self) -> None:
-        from core import linguistic_fingerprint
         from ui.style import get_theme as _gt
+
+        # 防重入：分析期间禁用按钮
+        if self._runner.is_running():
+            return
 
         suspect = self.row_a.get_text().strip()
         author_b = self.row_b.get_text().strip()
         controls = [r.get_text().strip() for r in self.control_rows]
         controls = [c for c in controls if c]
 
-        # 验证
-        a_len = len(suspect.replace(" ", "").replace("\n", "").replace("\r", ""))
+        # 验证（在主线程弹窗）
+        a_len = self._count_chars(suspect)
         if a_len < 3000:
             messagebox.showwarning(
                 "提示", f"可疑文本 A 仅 {a_len} 个字符，需要至少 3000 个字符。"
@@ -1268,19 +1469,27 @@ class FingerprintTab(ttk.Frame):
             messagebox.showwarning("提示", "请至少提供 1 个对照作者文本。")
             return
 
-        lang = self.app.get_lang()
+        self.run_btn.configure(state="disabled")
+        self.export_btn.configure(state="disabled")
         self.app.set_status("正在运行语言指纹分析……")
         self.results_text.delete("1.0", "end")
         self.results_text.insert("end", "⏳ 分析中，请稍候……\n")
 
-        try:
-            result = linguistic_fingerprint.analyze_fingerprint(
-                suspect, author_b, controls, lang
-            )
-        except Exception as e:
-            messagebox.showerror("错误", f"分析失败：{e}")
-            self.app.set_status("分析失败")
-            return
+        self._runner.run(
+            linguistic_fingerprint.analyze_fingerprint,
+            args=(suspect, author_b, controls, self.app.get_lang()),
+            on_success=lambda res: self._on_result(res, a_len, author_b, controls),
+            on_error=self._on_error,
+            title="语言指纹分析",
+            message="正在提取多维语言特征并执行统计检验...",
+        )
+
+    def _on_result(self, result: linguistic_fingerprint.FingerprintResult,
+                   a_len: int, author_b: str, controls: list) -> None:
+        from ui.style import get_theme as _gt
+        from viz import plots as _plots
+
+        self._last = result
 
         # ── 详细报告 ──
         self.results_text.delete("1.0", "end")
@@ -1288,23 +1497,17 @@ class FingerprintTab(ttk.Frame):
         self.results_text.insert("end", result.verdict_detail())
 
         # 补充输入摘要
-        a_count = a_len
-        b_count = len(author_b.replace(" ", "").replace("\n", "").replace("\r", ""))
-        c_counts = [
-            len(c.replace(" ", "").replace("\n", "").replace("\r", ""))
-            for c in controls
-        ]
+        b_count = self._count_chars(author_b)
+        c_counts = [self._count_chars(c) for c in controls]
         self.results_text.insert(
             "end",
             f"\n\n── 输入摘要 ──\n"
-            f"  可疑文本 A: {a_count:,} 字符\n"
+            f"  可疑文本 A: {a_len:,} 字符\n"
             f"  嫌疑作者 B: {b_count:,} 字符\n"
             + "".join(f"  对照作者 C{i+1}: {n:,} 字符\n" for i, n in enumerate(c_counts)),
         )
 
         # ── 图表 ──
-        from viz import plots as _plots
-
         dark = _gt().name == "dark"
         fig = _plots.make_fingerprint_bar(
             result.similarity_to_b,
@@ -1316,4 +1519,134 @@ class FingerprintTab(ttk.Frame):
         )
         embed_figure(self.chart_holder, fig)
 
+        self.export_btn.configure(state="normal")
         self.app.set_status(f"语言指纹分析完成 — 结论: {result.verdict}")
+        self.run_btn.configure(state="normal")
+
+    def _on_error(self, e: Exception) -> None:
+        if isinstance(e, ValueError):
+            messagebox.showwarning("输入错误", f"{e}\n\n请检查文本语言和长度是否符合要求。")
+            self.app.set_status("输入错误")
+        elif isinstance(e, MemoryError):
+            messagebox.showerror(
+                "内存不足",
+                "文本过长导致内存不足。\n"
+                "建议：将文本拆分为多个小文件分别分析，或关闭其他程序释放内存。"
+            )
+            self.app.set_status("内存不足")
+        else:
+            messagebox.showerror("错误", f"分析失败：{e}\n\n如果问题持续，请检查依赖库是否完整安装。")
+            self.app.set_status("分析失败")
+        self.run_btn.configure(state="normal")
+
+    def export(self) -> None:
+        if self._last is None:
+            return
+        from core.export import export_fingerprint_result
+        export_fingerprint_result(self._last, self.winfo_toplevel())
+# --------------------------------------------------------------------------- #
+# 批量处理
+# --------------------------------------------------------------------------- #
+
+
+class BatchTab(ttk.Frame):
+    """批量分析多个文件，输出聚合统计表格。"""
+
+    def __init__(self, master, app):
+        super().__init__(master)
+        self.app = app
+        self._runner = TaskRunner(self)
+        self._results: list = []
+
+        ctrl = ttk.Frame(self)
+        ctrl.pack(fill="x", padx=10, pady=(10, 4))
+        ttk.Button(ctrl, text="📂 选择文件", command=self.select_files).pack(side="left")
+        ttk.Button(ctrl, text="▶ 开始批量分析", style="Accent.TButton",
+                   command=self.run).pack(side="left", padx=(8, 0))
+        self.export_btn = ttk.Button(ctrl, text="📤 导出结果", command=self.export,
+                                      state="disabled")
+        self.export_btn.pack(side="left", padx=(8, 0))
+
+        # 文件列表 + 结果表格
+        cols = ("文件名", "状态", "语言", "字符数", "词元数", "句子数", "不重复词", "Top 词")
+        self.tree = ttk.Treeview(
+            self, columns=cols, show="headings",
+            selectmode="browse", height=14,
+        )
+        for c in cols:
+            self.tree.heading(c, text=c)
+        self.tree.column("文件名", width=180, anchor="w")
+        self.tree.column("状态", width=60, anchor="center")
+        self.tree.column("语言", width=70, anchor="center")
+        self.tree.column("字符数", width=70, anchor="e")
+        self.tree.column("词元数", width=70, anchor="e")
+        self.tree.column("句子数", width=70, anchor="e")
+        self.tree.column("不重复词", width=70, anchor="e")
+        self.tree.column("Top 词", width=240, anchor="w")
+
+        vsb = ttk.Scrollbar(self, orient="vertical", command=self.tree.yview)
+        self.tree.configure(yscrollcommand=vsb.set)
+        self.tree.pack(side="left", fill="both", expand=True, padx=(10, 0), pady=4)
+        vsb.pack(side="right", fill="y", pady=4, padx=(0, 10))
+
+        self._files: list[str] = []
+
+    def select_files(self) -> None:
+        paths = filedialog.askopenfilenames(filetypes=file_io.FILETYPES)
+        if not paths:
+            return
+        self._files = list(paths)
+        self._refresh_list()
+        self.app.set_status(f"已选择 {len(self._files)} 个文件")
+
+    def _refresh_list(self) -> None:
+        self.tree.delete(*self.tree.get_children())
+        for p in self._files:
+            self.tree.insert("", "end", values=(os.path.basename(p), "待分析", "", "", "", "", "", ""))
+
+    def run(self) -> None:
+        if not self._files:
+            messagebox.showinfo("提示", "请先选择文件。")
+            return
+        if self._runner.is_running():
+            return
+
+        self.export_btn.configure(state="disabled")
+        self.app.set_status("正在批量分析文件……")
+        self._runner.run(
+            batch.analyze_files,
+            args=(self._files, self.app.get_lang()),
+            on_success=self._on_result,
+            on_error=self._on_error,
+            title="批量分析",
+            message=f"正在分析 {len(self._files)} 个文件，请稍候...",
+        )
+
+    def _on_result(self, results: list) -> None:
+        self._results = results
+        self.tree.delete(*self.tree.get_children())
+        for item in results:
+            if item.status == "ok":
+                top = ", ".join(f"{w}({c})" for w, c in item.top_words)
+                values = (
+                    item.filename, "✓", item.lang,
+                    item.char_count, item.word_count, item.sentence_count,
+                    item.unique_words, top,
+                )
+            else:
+                values = (item.filename, "✗", "", "", "", "", "", item.error)
+            self.tree.insert("", "end", values=values)
+
+        ok_count = sum(1 for r in results if r.status == "ok")
+        self.export_btn.configure(state="normal")
+        self.app.set_status(f"批量分析完成 — {ok_count}/{len(results)} 成功")
+
+    def _on_error(self, e: Exception) -> None:
+        messagebox.showerror("错误", f"批量分析失败：{e}")
+        self.app.set_status("批量分析失败")
+
+    def export(self) -> None:
+        if not self._results:
+            return
+        from core.export import export_batch_result
+        export_batch_result(self._results, self.winfo_toplevel())

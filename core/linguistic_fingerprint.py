@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import math
 import random
+import re
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple
 
@@ -34,6 +35,7 @@ from core.analyzer import (  # type: ignore[import]
     split_sentences,
     tokenize,
 )
+from core.log import logger
 
 # =============================================================================
 # 扩充虚词列表（比 analyzer.py 中的 stop words 更全面）
@@ -149,7 +151,7 @@ def get_func_words(lang: str) -> frozenset:
 # 标点集合
 # =============================================================================
 
-_ZH_PUNCT = "，。！？、；：""''（）《》【】…—～·「」『』﹁﹂"
+_ZH_PUNCT = "，。！？、；：""（）《》【】…—～·「」『』﹁﹂〔〕〈〉〖〗""''（）《》【】…—～·「」『』﹁﹂"
 _EN_PUNCT = ",.!?;:\"'()-—…"
 
 _PUNCT_MAP = {
@@ -372,9 +374,14 @@ def segment_text(
     return segments
 
 
+def _strip_chars(text: str) -> int:
+    """统计不含任何空白字符的字符数（性能优化版）。"""
+    return len(re.sub(r"\s", "", text))
+
+
 def _non_space_len(text: str) -> int:
     """不包含空白和换行的字符数。"""
-    return len(text.replace(" ", "").replace("\n", "").replace("\r", ""))
+    return _strip_chars(text)
 
 
 # =============================================================================
@@ -442,15 +449,21 @@ def extract_function_word_freq(
     return result
 
 
+_ALL_PUNCT = set(
+    _ZH_PUNCT + _EN_PUNCT +
+    " \n\r\t\x00\x01\x02\x03\x04\x05\x06\x07\x08\x0b\x0c\x0e\x0f"
+    "\x10\x11\x12\x13\x14\x15\x16\x17\x18\x19\x1a\x1b\x1c\x1d\x1e\x1f"
+)
+
+
 def _clean_for_char_ngram(text: str, lang: str) -> str:
     """去掉标点和空白，英文转小写，返回可用于字级 n-gram 的字符串。"""
     if lang == "en":
         # 只保留 a-z 字母
         return "".join(ch.lower() for ch in text if ch.isalpha())
     else:
-        # 中文：去标点和空白
-        punct = set(_ZH_PUNCT + " \n\r\t")
-        return "".join(ch for ch in text if ch not in punct)
+        # 中文：去标点和空白（使用更完整的标点集合）
+        return "".join(ch for ch in text if ch not in _ALL_PUNCT)
 
 
 def extract_char_ngrams(
@@ -592,12 +605,17 @@ def build_global_vocab(
     """扫描所有文本，建立全局虚词 / n-gram / bigram / 标点词汇表。
 
     确保每个片段的特征向量维度一致。
+    性能优化：每个文本只 tokenize 一次，结果缓存复用。
     """
+    # --- 预分词：每个文本只调用一次 tokenize，避免重复 ---
+    tokenized_cache: List[List[Token]] = []
+    for text in texts:
+        tokenized_cache.append(tokenize(text, lang))
+
     # --- 虚词：取全局频率最高的 top_n_func 个 ---
     func_set = get_func_words(lang)
     func_counts: Dict[str, int] = {}
-    for text in texts:
-        tokens = tokenize(text, lang)
+    for tokens in tokenized_cache:
         for t in tokens:
             w = t.text.lower() if lang == "en" else t.text
             if w in func_set:
@@ -618,8 +636,7 @@ def build_global_vocab(
 
     # --- 词 bigram：全局频率最高的 top_n_bigram 个 ---
     bg_counts: Dict[str, int] = {}
-    for text in texts:
-        tokens = tokenize(text, lang)
+    for tokens in tokenized_cache:
         words = []
         for t in tokens:
             if _is_punct(t.text) or not t.text.strip():
@@ -1049,6 +1066,9 @@ def analyze_fingerprint(
         raise ValueError("至少需要 1 个对照作者文本。")
     if len(controls) > 3:
         controls = controls[:3]  # 静默截断
+
+    logger.info("开始语言指纹分析: A=%d字符, B=%d字符, 对照=%d个",
+                a_len, _non_space_len(suspect_author_text), len(controls))
 
     # --- 2. 语言检测 ---
     if lang is None:
