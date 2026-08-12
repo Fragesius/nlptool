@@ -110,6 +110,18 @@ MIT © 2026 Fragesius
 
 ## 📦 Changelog
 
+### v1.3.0-dev — Burrows' Delta 文体计量（译者风格识别）
+
+📏 **Burrows' Delta 文体计量**
+- 新增 `core/stylometry.py`：英文分词、高频特征词相对频率表、z 分数标准化、两两 Delta 距离矩阵，全部为纯 Python 实现（无 scipy/pandas）
+- 自实现平均联结（average-linkage）凝聚式层次聚类
+- 新增 `viz/dendrogram.py`：matplotlib 手绘树状图，300 dpi 导出 PNG
+- 新增命令行入口 `experiments/run_delta.py`（`--input/--top-n/--out`），输出 `delta_matrix.csv` 与 `dendrogram.png`
+- 新增 `experiments/sample_corpus/` 4 篇合成英文语料（两篇抬高 "the"、两篇抬高 "of"）供冒烟测试
+- 新增 `tests/test_stylometry.py` 单元测试，兼容 `python run_tests.py`
+
+---
+
 ### v1.2.0 — 语言学研究工作台：异步分析、批量处理、导出与测试
 
 🧰 **工程化与稳定性**
