@@ -1,25 +1,12 @@
-# 运行时用户数据（含历史记录、API 密钥等隐私信息）
+﻿__pycache__/
+*.pyc
 _data/
+venv/
+.venv/
 
-# PyInstaller 构建产物
+# PyInstaller 构建产物（体积大，不入库；发布请用 GitHub Releases）
 build/
 dist/
-*.spec
-*.spec.bak
 
-# Python
-__pycache__/
-*.pyc
-*.pyo
-.venv/
-venv/
-
-# IDE
-.vscode/
-.idea/
-
-# 临时调试文件（脚本与生成的测试图）
-_test_*.py
-_check_*.py
-_*.png
-_*.svg
+# 实验输出（由 experiments/run_delta.py 生成）
+experiments/output/
