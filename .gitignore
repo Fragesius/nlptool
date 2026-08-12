@@ -1,25 +1,5 @@
-# 运行时用户数据（含历史记录、API 密钥等隐私信息）
-_data/
-
-# PyInstaller 构建产物
-build/
-dist/
-*.spec
-*.spec.bak
-
-# Python
-__pycache__/
+﻿__pycache__/
 *.pyc
-*.pyo
-.venv/
+_data/
 venv/
-
-# IDE
-.vscode/
-.idea/
-
-# 临时调试文件（脚本与生成的测试图）
-_test_*.py
-_check_*.py
-_*.png
-_*.svg
+.venv/
