@@ -68,6 +68,7 @@ nlptool/
 ├── requirements.txt                # 依赖
 ├── core/
 │   ├── analyzer.py                 # 分词、词性、NER、关键词、情感
+│   ├── stylometry.py               # Burrows' Delta 文体计量（纯 Python）
 │   ├── linguistic_fingerprint.py   # 语言指纹/作者识别引擎
 │   ├── comparison.py               # 可读性、中英对齐
 │   ├── api_backend.py              # 在线 API 后端
@@ -75,7 +76,17 @@ nlptool/
 │   ├── history.py                  # 分析历史
 │   └── _paths.py                   # 路径管理
 ├── viz/
-│   └── plots.py                    # matplotlib 图表
+│   ├── plots.py                    # matplotlib 图表
+│   └── dendrogram.py               # 层次聚类树状图（300 dpi PNG）
+├── experiments/
+│   ├── run_delta.py                # Burrows' Delta 命令行入口
+│   └── sample_corpus/              # 4 篇合成冒烟语料（含生成脚本）
+├── tests/
+│   ├── test_analyzer.py            # 核心分析测试
+│   ├── test_comparison.py          # 可读性/对齐测试
+│   ├── test_concordance.py         # KWIC 测试
+│   ├── test_stylometry.py          # 文体计量与聚类测试
+│   └── test_spacy_fallback.py      # spaCy 缺失降级回归测试
 └── ui/
     ├── main_window.py              # 主窗口 & 菜单
     ├── tabs.py                     # 功能标签页
@@ -119,6 +130,12 @@ MIT © 2026 Fragesius
 - 新增命令行入口 `experiments/run_delta.py`（`--input/--top-n/--out`），输出 `delta_matrix.csv` 与 `dendrogram.png`
 - 新增 `experiments/sample_corpus/` 4 篇合成英文语料（两篇抬高 "the"、两篇抬高 "of"）供冒烟测试
 - 新增 `tests/test_stylometry.py` 单元测试，兼容 `python run_tests.py`
+
+🐞 **稳定性修复**
+- 修复 `core/analyzer.py::_get_spacy`：spaCy 库或模型缺失时 `model` 变量未赋值，警告日志自身抛 `UnboundLocalError`，导致英文分词 / 基础统计 / KWIC 的降级路径整体崩溃（4 个既有测试因此失败）；现在只警告并按约定回退（正则分词 / 返回空结果）
+- 新增 `tests/test_spacy_fallback.py`：分别模拟「spaCy 包未安装」（import 抛 `ImportError`）与「已装但模型缺失」（`load` 抛 `OSError`）两种场景，覆盖 `tokenize_en`、`analyze_basic`、KWIC 的降级路径，不安装 en_core_web_sm 也能通过
+- 冒烟语料重新生成：同组两篇不再完全相同——四篇共享同一填充词多重集，组内通过「目标虚词 ↔ 配套虚词」配比微调（the/a、of/in）制造频率偏移，组内 Delta > 0 但仍远小于跨组，聚类分组不变；`tests/test_stylometry.py` 同步新增"非 identical 同组仍聚为一枝"用例
+- 树状图固定文案英文化：标题 "Burrows' Delta Hierarchical Clustering"、横轴 "Merge distance (Burrows' Delta)"，输出可直接用于英文学术投稿，且避免无中文字体环境乱码（叶子标签仍取文件名）
 
 ---
 

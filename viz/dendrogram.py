@@ -60,7 +60,7 @@ def _collect_leaves(node: Dict[str, object]) -> List[Dict[str, object]]:
 def plot_dendrogram(
     tree: Dict[str, object],
     out_path: Union[str, Path],
-    title: str = "Burrows' Delta 层次聚类树状图",
+    title: str = "Burrows' Delta Hierarchical Clustering",
 ) -> Path:
     """绘制层次聚类树状图并保存为 PNG（300 dpi）。
 
@@ -100,7 +100,7 @@ def plot_dendrogram(
 
     ax.set_yticks([y_of[id(leaf)] for leaf in leaves])
     ax.set_yticklabels([str(leaf["label"]) for leaf in leaves])
-    ax.set_xlabel("合并距离（Burrows' Delta）")
+    ax.set_xlabel("Merge distance (Burrows' Delta)")
     ax.set_title(title)
     ax.set_xlim(left=0.0, right=max_h * 1.05 + 1e-12)
     ax.spines["top"].set_visible(False)

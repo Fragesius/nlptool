@@ -356,10 +356,11 @@ def _get_jieba():
 def _get_spacy(lang: str = "en"):
     """返回 spaCy 管线，缺失则返回 False。"""
     if lang not in _spacy_nlp:
+        # 模型名必须在 try 之前确定：否则 import spacy 本身失败时，
+        # except 分支引用未赋值的 model 会抛 UnboundLocalError，降级失效
+        model = {"en": "en_core_web_sm", "zh": "zh_core_web_sm"}[lang]
         try:
             import spacy  # type: ignore
-
-            model = {"en": "en_core_web_sm", "zh": "zh_core_web_sm"}[lang]
 
             # PyInstaller 打包后在 _internal 目录中找模型
             if getattr(sys, "frozen", False):

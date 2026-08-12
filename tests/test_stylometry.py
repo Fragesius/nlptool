@@ -96,14 +96,48 @@ def test_cluster_groups_sample_corpus():
         for p in sorted(SAMPLE_DIR.glob("*.txt"))
     }
     assert len(texts) == 4
+    # 组内两篇非 identical：内容与词频都有可控偏移
+    assert texts["text_the_a"] != texts["text_the_b"]
+    assert texts["text_of_a"] != texts["text_of_b"]
     dm = delta_matrix(zscore(build_freq_table(texts, n=100)))
-    tree = hierarchical_cluster(dm["matrix"], dm["labels"])
+    labels = dm["labels"]
+    # 组内 Delta > 0，但远小于跨组 Delta
+    for ga, gb, other in (
+        ("text_the_a", "text_the_b", "text_of_a"),
+        ("text_of_a", "text_of_b", "text_the_a"),
+    ):
+        i, j, k = labels.index(ga), labels.index(gb), labels.index(other)
+        assert dm["matrix"][i][j] > 0.0
+        assert dm["matrix"][i][j] < dm["matrix"][i][k]
+    tree = hierarchical_cluster(dm["matrix"], labels)
     g1, g2 = _top_level_groups(tree)
     expected = {
         frozenset({"text_the_a", "text_the_b"}),
         frozenset({"text_of_a", "text_of_b"}),
     }
     assert {g1, g2} == expected
+
+
+def test_cluster_non_identical_same_style():
+    """非 identical 但同组（风格相近）的文本仍聚为一枝。"""
+    base = "cat dog house tree sun moon river stone " * 40
+    # 同组两篇：共享 base，"the"/"a" 配比不同 → 词频不同、非 identical
+    s1 = base + "the " * 60 + "a " * 20
+    s2 = base + "the " * 50 + "a " * 30
+    # 异组对照：抬高 "of"/"in"
+    other = base + "of " * 60 + "in " * 20
+    assert s1 != s2
+    texts = {"s1": s1, "s2": s2, "other": other}
+    dm = delta_matrix(zscore(build_freq_table(texts, n=50)))
+    labels = dm["labels"]
+    i, j = labels.index("s1"), labels.index("s2")
+    assert dm["matrix"][i][j] > 0.0  # 非 identical → Delta 非零
+    tree = hierarchical_cluster(dm["matrix"], labels)
+    # 3 篇时树根一侧应为 {s1, s2}，另一侧为 {other}
+    assert {frozenset(tree["left"]["members"]), frozenset(tree["right"]["members"])} == {
+        frozenset({"s1", "s2"}),
+        frozenset({"other"}),
+    }
 
 
 def test_cluster_identical_texts_merge_first():

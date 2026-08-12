@@ -1,22 +1,27 @@
 """生成 4 篇合成英文测试语料（一次性脚本）。
 
 设计（供 Burrows' Delta 冒烟测试验证聚类正确性）：
-- text_the_a / text_the_b：显著抬高 "the" 的使用频率（约 15%）
-- text_of_a / text_of_b：显著抬高 "of" 的使用频率（约 15%）
-- 四篇共享完全相同的填充词多重集，因此组间差异只来自目标词；
-  组内两篇为同一词表的不同排列（词频完全一致，Delta 为 0，
-  模拟"同一风格写就的两段不同文字"）。
+- text_the_a / text_the_b：显著抬高定冠词 "the"（配套虚词 "a"）
+- text_of_a / text_of_b：显著抬高介词 "of"（配套虚词 "in"）
+- 四篇共享完全相同的填充词多重集（2550 词），总长均为 3000 词，
+  因此填充词在 z-score 阶段因零方差被全部剔除，不稀释虚词信号；
+- 组内两篇**非 identical**：通过「目标虚词 ↔ 配套虚词」配比微调
+  制造可控的频率偏移（如 the 300+a 150 vs the 270+a 180），
+  并各自独立 shuffle，内容与词频都不同，但风格相近。
+  实测组内 Delta ≈ 0.14，跨组 Delta ≈ 1.95（约 14 倍差距），
+  平均联结层次聚类仍按设计把同组两篇先聚为一枝。
 
 注意：Burrows' Delta 先做 z 分数标准化，任何纯随机噪声特征都会被
 放大到单位方差并淹没目标词信号，故合成语料必须让填充词频率
-跨文本严格一致，不能用随机扰动模拟"真实感"。
+跨文本严格一致；组内差异只允许来自成对虚词的配比此消彼长
+（总词数保持一致），不能用随机扰动模拟"真实感"。
 """
 import random
 from pathlib import Path
 
 OUT = Path(__file__).parent
 
-# 填充词池（刻意不含 the/of，便于精确控制二者频率）
+# 填充词池（刻意不含任何虚词，便于精确控制目标虚词频率）
 POOL = (
     "cat dog house tree sun moon river stone bird fish garden road field "
     "walk run sleep eat drink sing read write speak jump sit stand look "
@@ -28,7 +33,14 @@ POOL = (
 ).split()
 
 N_WORDS = 3000
-N_TARGET = 450  # 目标词约占 15%
+N_FILLERS = 2550
+
+# 每组：(目标虚词, a 篇目标词数, b 篇目标词数, 配套虚词, a 篇配套词数, b 篇配套词数)
+# a/b 两篇虚词总量相等（总词数一致），但配比不同 → 组内频率非 identical
+GROUPS = {
+    "the": ("the", 300, 270, "a", 150, 180),
+    "of": ("of", 300, 270, "in", 150, 180),
+}
 
 
 def to_text(words):
@@ -41,30 +53,20 @@ def to_text(words):
 
 def main():
     rng = random.Random(7)
-    fillers = [rng.choice(POOL) for _ in range(N_WORDS - N_TARGET)]
+    fillers = [rng.choice(POOL) for _ in range(N_FILLERS)]
 
-    for group, target in (("the", "the"), ("of", "of")):
-        # 文本 A：目标词均匀穿插在填充词中
-        step = (N_WORDS - N_TARGET) / N_TARGET
-        words_a = []
-        fi = 0
-        for k in range(N_TARGET):
-            words_a.append(target)
-            take = round((k + 1) * step) - round(k * step)
-            words_a.extend(fillers[fi:fi + take])
-            fi += take
-        words_a.extend(fillers[fi:])
-        # 文本 B：同一词表打乱排列（词频与 A 完全一致）
-        words_b = words_a[:]
-        random.Random(11).shuffle(words_b)
-
-        for suffix, words in (("a", words_a), ("b", words_b)):
+    for group, (w1, n1a, n1b, w2, n2a, n2b) in GROUPS.items():
+        for suffix, c1, c2 in (("a", n1a, n2a), ("b", n1b, n2b)):
+            words = fillers + [w1] * c1 + [w2] * c2
+            assert len(words) == N_WORDS
+            # 每篇独立 shuffle：词序与词频在组内均不同
+            random.Random(f"{group}-{suffix}").shuffle(words)
             text = to_text(words)
             name = f"text_{group}_{suffix}"
             (OUT / f"{name}.txt").write_text(text, encoding="utf-8")
             n = len(text.split())
-            c = sum(1 for w in words if w == target)
-            print(f"{name}.txt: {n} 词, '{target}' 出现 {c} 次 ({c / n:.1%})")
+            print(f"{name}.txt: {n} 词, "
+                  f"'{w1}' x{c1} ({c1 / n:.1%}), '{w2}' x{c2} ({c2 / n:.1%})")
 
 
 if __name__ == "__main__":
