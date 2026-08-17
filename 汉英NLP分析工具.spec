@@ -20,6 +20,11 @@ tmp_ret = collect_all('docx')
 datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
 tmp_ret = collect_all('PyPDF2')
 datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
+# customtkinter 需打包其主题资源（assets/themes/*.json）
+tmp_ret = collect_all('customtkinter')
+datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
+# 本项目的自定义主题文件
+datas += [('ui/theme_academic.json', 'ui')]
 
 
 a = Analysis(

@@ -82,7 +82,11 @@ _THEME_JSON = os.path.join(os.path.dirname(os.path.abspath(__file__)),
 def init_appearance() -> None:
     """初始化 customtkinter：跟随系统深/浅色 + 加载墨绿主题。须在创建根窗口前调用。"""
     ctk.set_appearance_mode("System")
-    ctk.set_default_color_theme(_THEME_JSON)
+    if os.path.exists(_THEME_JSON):
+        ctk.set_default_color_theme(_THEME_JSON)
+    else:
+        # PyInstaller 打包环境兜底（spec 已收集本文件，正常不会走到）
+        ctk.set_default_color_theme("green")
 
 
 def current_mode() -> str:
