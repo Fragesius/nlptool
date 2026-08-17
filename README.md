@@ -121,6 +121,16 @@ MIT © 2026 Fragesius
 
 ## 📦 Changelog
 
+### v1.4.1 — 批量实验管线图形界面
+
+🖱 **「批量实验」标签页**
+- 新增 `ExperimentTab`（`ui/tabs.py`）：鼠标点选语料目录（按 一级子文件夹=组别 组织）、输出目录（默认 `语料目录/experiment_output`）、切片词数（默认 2000，正整数校验），「切片后实验 / 直接实验」单选，一键跑完整条译者风格实验管线
+- GUI 不复制实验逻辑：切片直接调 `experiments/slice_corpus.py` 的 `slice_corpus()`，实验直接调 `experiments/run_experiment.py` 的 `run()`；命令行入口、输出文件与既有测试行为完全不变
+- 耗时任务复用 v1.2.0 建立的后台线程 + 进度对话框模式，界面不卡死；后台线程内临时将 matplotlib 切到 Agg 后端，避免非主线程建图崩溃
+- 结果摘要直接取自 `run()` 返回的结果字典（新增 `conclusion`/`significant` 字段，report.md 结论段的中文模板文字随之暴露给调用方），展示组内/组间 Delta 及比值、Wilcoxon p、置换检验 p、Cohen's d 与显著性结论；「打开输出文件夹」按钮跨平台打开结果目录（`os.startfile` / `open` / `xdg-open`）
+- 实验失败（目录结构不对、语料为空、切片结果为空等）弹错误对话框说明原因，不静默崩溃
+- `tests/test_experiment.py` 新增用例：`run()` 作为库函数被外部调用时返回包含全部摘要字段的结果字典且四个输出工件齐全
+
 ### v1.4.0-dev — 真实语料批量实验管线（译者风格识别）
 
 🧪 **批量分组实验管线**

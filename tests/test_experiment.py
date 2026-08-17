@@ -191,3 +191,53 @@ def test_run_experiment_warns_without_separation():
         )
         report = (out / "report.md").read_text(encoding="utf-8")
         assert "Sanity check" in report
+
+
+def test_run_experiment_returns_result_dict():
+    """run() 可作为库函数被外部（如 GUI）调用，返回结构化结果字典。"""
+    try:
+        import matplotlib  # noqa: F401
+    except ImportError:
+        print("    (skipped: matplotlib not installed)")
+        return
+
+    from experiments.run_experiment import run
+
+    with tempfile.TemporaryDirectory() as td:
+        root = Path(td)
+        inp = _build_groups(
+            root,
+            {
+                "translator_A": ["text_the_a.txt", "text_the_b.txt"],
+                "translator_B": ["text_of_a.txt", "text_of_b.txt"],
+            },
+        )
+        out = root / "out"
+
+        stats = run(inp, out, perm_n=200)
+
+        # 结果字典包含 GUI 摘要所需的全部字段。
+        expected_keys = {
+            "groups", "n_samples",
+            "within_delta_mean", "cross_delta_mean",
+            "delta_diff", "delta_ratio",
+            "same_sim_mean", "cross_sim_mean",
+            "p_wilcoxon", "p_permutation", "cohens_d",
+            "significant", "conclusion",
+        }
+        missing = expected_keys - set(stats)
+        assert not missing, f"result dict missing keys: {missing}"
+
+        assert stats["groups"] == {"translator_A": 2, "translator_B": 2}
+        assert stats["n_samples"] == 4
+        for key in ("within_delta_mean", "cross_delta_mean", "delta_diff",
+                    "same_sim_mean", "cross_sim_mean",
+                    "p_wilcoxon", "p_permutation", "cohens_d"):
+            assert isinstance(stats[key], float), f"{key} is not a float"
+        assert isinstance(stats["significant"], bool)
+        assert isinstance(stats["conclusion"], str) and stats["conclusion"]
+
+        # 输出工件与命令行方式一致。
+        for name in ("delta_matrix.csv", "dendrogram.png",
+                     "fingerprint_pairs.csv", "report.md"):
+            assert (out / name).is_file(), f"missing artifact: {name}"

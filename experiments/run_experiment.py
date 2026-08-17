@@ -365,6 +365,9 @@ def run(
         "p_wilcoxon": p_wilcoxon,
         "p_permutation": p_perm,
         "cohens_d": d_val,
+        "significant": significant,
+        # report.md 结论段的中文模板文字，供 GUI 等调用方直接展示
+        "conclusion": conclusion,
     }
 
 

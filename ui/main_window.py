@@ -21,7 +21,7 @@ from ui.style import (
     FONT_MONO,
     FONT_SCALE,
 )
-from ui.tabs import BasicTab, SyntaxTab, CompareTab, VizTab, HistoryTab, FingerprintTab, BatchTab
+from ui.tabs import BasicTab, SyntaxTab, CompareTab, VizTab, HistoryTab, FingerprintTab, BatchTab, ExperimentTab
 
 import ui.style as s
 
@@ -326,6 +326,7 @@ class App:
         self.batch_tab = BatchTab(nb, self)
         self.history_tab = HistoryTab(nb, self)
         self.fingerprint_tab = FingerprintTab(nb, self)
+        self.experiment_tab = ExperimentTab(nb, self)
 
         # ── Notebook 标签：紧凑模式下缩短文字 ──
         if self._compact:
@@ -336,6 +337,7 @@ class App:
             nb.add(self.batch_tab, text="  📁 批量  ")
             nb.add(self.history_tab, text="  📜 历史  ")
             nb.add(self.fingerprint_tab, text="  🔬 指纹  ")
+            nb.add(self.experiment_tab, text="  🧪 实验  ")
         else:
             nb.add(self.basic_tab, text="  📊 基础分析  ")
             nb.add(self.syntax_tab, text="  🔍 句法/语义  ")
@@ -344,6 +346,7 @@ class App:
             nb.add(self.batch_tab, text="  📁 批量处理  ")
             nb.add(self.history_tab, text="  📜 历史记录  ")
             nb.add(self.fingerprint_tab, text="  🔬 语言指纹  ")
+            nb.add(self.experiment_tab, text="  🧪 批量实验  ")
 
     def _on_text_focus_in(self, event) -> None:
         if self._placeholder_shown:
