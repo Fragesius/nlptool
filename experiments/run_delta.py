@@ -1,11 +1,12 @@
-"""Burrows' Delta 文体计量命令行入口（不走 UI）。
+"""Burrows' Delta stylometry command-line entry point (no UI).
 
-用法：
+Usage:
     python experiments/run_delta.py --input experiments/sample_corpus \
         --out experiments/output [--top-n 100]
 
-读取输入文件夹中全部 .txt 文件（文本名 = 文件名去扩展名），
-输出 delta_matrix.csv 与 dendrogram.png，关键信息打印到 stdout。
+Reads all .txt files in the input folder (text name = filename without
+extension), writes delta_matrix.csv and dendrogram.png, and prints key
+information to stdout.
 """
 
 from __future__ import annotations
@@ -42,18 +43,20 @@ def print_merges(node: dict, depth: int = 0) -> None:
     if node["label"] is not None:
         print(f"{indent}· {node['label']}")
     else:
-        print(f"{indent}+ 合并距离 = {node['height']:.4f}")
+        print(f"{indent}+ merge distance = {node['height']:.4f}")
         print_merges(node["left"], depth + 1)
         print_merges(node["right"], depth + 1)
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Burrows' Delta 文体计量：译者/作者风格聚类"
+        description="Burrows' Delta stylometry: author/translator style clustering"
     )
-    parser.add_argument("--input", required=True, help="语料文件夹（读取其中全部 .txt）")
-    parser.add_argument("--top-n", type=int, default=100, help="特征词数量（默认 100）")
-    parser.add_argument("--out", required=True, help="输出目录")
+    parser.add_argument("--input", required=True,
+                        help="corpus folder (all .txt files inside are read)")
+    parser.add_argument("--top-n", type=int, default=100,
+                        help="number of feature words (default 100)")
+    parser.add_argument("--out", required=True, help="output directory")
     args = parser.parse_args()
 
     input_dir = Path(args.input)
@@ -61,23 +64,24 @@ def main() -> None:
     out_dir.mkdir(parents=True, exist_ok=True)
 
     if not input_dir.is_dir():
-        print(f"错误：输入文件夹不存在：{input_dir}", file=sys.stderr)
+        print(f"error: input folder not found: {input_dir}", file=sys.stderr)
         sys.exit(1)
 
     texts = load_corpus(input_dir)
     if len(texts) < 2:
-        print(f"错误：{input_dir} 中 .txt 少于 2 篇，无法比较", file=sys.stderr)
+        print(f"error: fewer than 2 .txt files under {input_dir}, "
+              f"nothing to compare", file=sys.stderr)
         sys.exit(1)
 
-    print(f"已加载 {len(texts)} 篇文本（特征词 top-{args.top_n}）：")
+    print(f"Loaded {len(texts)} text(s) (top-{args.top_n} feature words):")
     for name, text in texts.items():
-        print(f"  - {name}: {len(tokenize(text))} 词")
+        print(f"  - {name}: {len(tokenize(text))} words")
 
     freq_table = build_freq_table(texts, n=args.top_n)
     zs = zscore(freq_table)
-    print(f"\n特征词 {len(freq_table['features'])} 个，"
-          f"其中标准差为 0 被剔除 {len(zs['dropped'])} 个"
-          + (f"（{', '.join(zs['dropped'])}）" if zs["dropped"] else ""))
+    print(f"\n{len(freq_table['features'])} feature words, "
+          f"{len(zs['dropped'])} dropped for zero standard deviation"
+          + (f" ({', '.join(zs['dropped'])})" if zs["dropped"] else ""))
 
     dm = delta_matrix(zs)
     labels = dm["labels"]
@@ -89,15 +93,15 @@ def main() -> None:
         writer.writerow([""] + labels)
         for label, row in zip(labels, matrix):
             writer.writerow([label] + [f"{d:.6f}" for d in row])
-    print(f"\nDelta 距离矩阵已写入：{csv_path}")
+    print(f"\nDelta distance matrix written: {csv_path}")
     for label, row in zip(labels, matrix):
         print("  " + label.ljust(16) + "  ".join(f"{d:.4f}" for d in row))
 
     tree = hierarchical_cluster(matrix, labels)
     png_path = plot_dendrogram(tree, out_dir / "dendrogram.png")
-    print(f"\n层次聚类（average-linkage）合并过程：")
+    print(f"\nHierarchical clustering (average-linkage) merge order:")
     print_merges(tree)
-    print(f"\n树状图已保存：{png_path}")
+    print(f"\nDendrogram saved: {png_path}")
 
 
 if __name__ == "__main__":

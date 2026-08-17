@@ -132,12 +132,123 @@ def _effect_size_note(d: float) -> str:
     return "large"
 
 
+# ── report.md 模板文字（v2.1.0）──────────────────────────────────────
+# zh 模板与 v2.0.0 的 report.md 逐字节一致；en 为其英文对照。
+# 只含模板文字：数字、表格结构由 run() 中的格式化代码生成，两种语言共用。
+REPORT_TEMPLATES_ZH = {
+    "conclusion_no_signal": (
+        "同译者对相似度（{same_mean:.4f}）并未高于跨译者对"
+        "（{cross_mean:.4f}），未检测到译者风格信号盖过原文信号的证据。"
+    ),
+    "conclusion_significant": (
+        "同译者对相似度显著高于跨译者对"
+        "（Wilcoxon p={p_wilcoxon:.4f}，置换检验 p={p_perm:.4f}，"
+        "Cohen's d={d_val:.3f}，{effect}效应），"
+        "译者风格信号在本语料上可识别。"
+    ),
+    "conclusion_not_significant": (
+        "同译者对相似度（{same_mean:.4f}）高于跨译者对"
+        "（{cross_mean:.4f}），但差异未达统计显著"
+        "（Wilcoxon p={p_wilcoxon:.4f}，置换检验 p={p_perm:.4f}，"
+        "Cohen's d={d_val:.3f}）。"
+    ),
+    "delta_warning": (
+        "> ⚠ **Sanity check**: cross/within Delta ratio is "
+        "{ratio} (≤ 1.1) —— Burrows' Delta 未检测到组间分离。"
+        "可能原因：切片过短、语料过于同质、或高频特征被内容噪声主导。"
+        "请勿将阴性 Delta 直接解读为「无译者风格」，"
+        "结论应结合下方指纹相似度与统计检验综合判断。"
+    ),
+    "nn_above": (
+        "1-NN 留一法分类准确率 {acc:.1%}，高于随机基线 "
+        "{base:.1%}：基于 Delta 距离的最近邻能稳定找回同组样本，"
+        "组间风格信号可识别。"
+    ),
+    "nn_below": (
+        "1-NN 留一法分类准确率 {acc:.1%}，未超过随机基线 "
+        "{base:.1%}：Delta 距离不足以区分各组。"
+    ),
+    "sc_no_pairs": "无可配对篇目，信号竞争检验未执行。",
+    "sc_leader_original": "原文",
+    "sc_leader_translator": "译者",
+    "sc_significant": (
+        "符号检验显著（p={p:.4f}）：{leader}信号强于对方"
+        "（原文信号胜 {wins_o} 次，译者信号胜 {wins_t} 次）。"
+    ),
+    "sc_not_significant": (
+        "符号检验不显著（p={p:.4f}）：原文信号胜 {wins_o} 次，"
+        "译者信号胜 {wins_t} 次，两种信号的差异未达统计显著。"
+    ),
+    "sec_conclusion": "## 结论",
+}
+
+REPORT_TEMPLATES_EN = {
+    "conclusion_no_signal": (
+        "Same-translator pair similarity ({same_mean:.4f}) is not higher "
+        "than cross-translator pair similarity ({cross_mean:.4f}); no "
+        "evidence that the translator-style signal overrides the "
+        "original-text signal."
+    ),
+    "conclusion_significant": (
+        "Same-translator pair similarity is significantly higher than "
+        "cross-translator pair similarity "
+        "(Wilcoxon p={p_wilcoxon:.4f}, permutation test p={p_perm:.4f}, "
+        "Cohen's d={d_val:.3f}, {effect} effect); "
+        "the translator-style signal is detectable in this corpus."
+    ),
+    "conclusion_not_significant": (
+        "Same-translator pair similarity ({same_mean:.4f}) is higher "
+        "than cross-translator pair similarity ({cross_mean:.4f}), but "
+        "the difference is not statistically significant "
+        "(Wilcoxon p={p_wilcoxon:.4f}, permutation test p={p_perm:.4f}, "
+        "Cohen's d={d_val:.3f})."
+    ),
+    "delta_warning": (
+        "> ⚠ **Sanity check**: cross/within Delta ratio is "
+        "{ratio} (≤ 1.1) — Burrows' Delta detected no separation "
+        "between groups. Possible causes: chunks too short, corpus too "
+        "homogeneous, or high-frequency features dominated by content "
+        "noise. Do not read a negative Delta result as 'no translator "
+        "style'; weigh it together with the fingerprint similarity and "
+        "the statistical tests below."
+    ),
+    "nn_above": (
+        "1-NN leave-one-out classification accuracy {acc:.1%}, above "
+        "the random baseline {base:.1%}: Delta-distance nearest "
+        "neighbours reliably recover same-group samples; the "
+        "group-level style signal is detectable."
+    ),
+    "nn_below": (
+        "1-NN leave-one-out classification accuracy {acc:.1%}, not "
+        "above the random baseline {base:.1%}: Delta distances are "
+        "not sufficient to separate the groups."
+    ),
+    "sc_no_pairs": "No pairable works; the signal competition test was not run.",
+    "sc_leader_original": "original",
+    "sc_leader_translator": "translator",
+    "sc_significant": (
+        "Sign test significant (p={p:.4f}): the {leader} signal is "
+        "stronger (original-signal wins {wins_o}, translator-signal "
+        "wins {wins_t})."
+    ),
+    "sc_not_significant": (
+        "Sign test not significant (p={p:.4f}): original-signal wins "
+        "{wins_o}, translator-signal wins {wins_t}; the difference "
+        "between the two signals is not statistically significant."
+    ),
+    "sec_conclusion": "## Conclusion",
+}
+
+REPORT_TEMPLATES = {"zh": REPORT_TEMPLATES_ZH, "en": REPORT_TEMPLATES_EN}
+
+
 def run(
     input_dir: Path,
     out_dir: Path,
     top_n: int = 100,
     perm_n: int = 10000,
     lang: str = "en",
+    report_lang: str = "zh",
     progress_callback=None,
 ) -> Dict[str, object]:
     """Run the full grouped experiment and write all artifacts.
@@ -147,6 +258,9 @@ def run(
     :param top_n: number of most-frequent-word features for Delta
     :param perm_n: permutation test iterations
     :param lang: language code for fingerprint features ("en" or "zh")
+    :param report_lang: template language of ``report.md`` ("zh" or "en";
+        "zh" is byte-identical to the v2.0.0 report). Only template text
+        changes — numbers, tables and CSV artifacts are unaffected
     :param progress_callback: optional ``callback(current, total,
         stage_name)`` invoked at each pipeline step; omitting it keeps
         the command-line behavior unchanged
@@ -359,66 +473,52 @@ def run(
     significant = (
         max(p_wilcoxon, p_perm) < 0.05 and same_mean > cross_mean_sim
     )
-    if same_mean <= cross_mean_sim:
-        conclusion = (
-            f"同译者对相似度（{same_mean:.4f}）并未高于跨译者对"
-            f"（{cross_mean_sim:.4f}），未检测到译者风格信号盖过原文信号的证据。"
-        )
-    elif significant:
-        conclusion = (
-            f"同译者对相似度显著高于跨译者对"
-            f"（Wilcoxon p={p_wilcoxon:.4f}，置换检验 p={p_perm:.4f}，"
-            f"Cohen's d={d_val:.3f}，{_effect_size_note(d_val)}效应），"
-            f"译者风格信号在本语料上可识别。"
-        )
+
+    def _conclusion(t: Dict[str, str]) -> str:
+        fmt = dict(same_mean=same_mean, cross_mean=cross_mean_sim,
+                   p_wilcoxon=p_wilcoxon, p_perm=p_perm, d_val=d_val,
+                   effect=_effect_size_note(d_val))
+        if same_mean <= cross_mean_sim:
+            return t["conclusion_no_signal"].format(**fmt)
+        if significant:
+            return t["conclusion_significant"].format(**fmt)
+        return t["conclusion_not_significant"].format(**fmt)
+
+    def _nn_conclusion(t: Dict[str, str]) -> str:
+        key = "nn_above" if nn_accuracy > nn_baseline else "nn_below"
+        return t[key].format(acc=nn_accuracy, base=nn_baseline)
+
+    def _sc_conclusion(t: Dict[str, str]) -> str:
+        if sc_wins_o + sc_wins_t == 0:
+            return t["sc_no_pairs"]
+        leader = (t["sc_leader_original"] if sc_wins_o >= sc_wins_t
+                  else t["sc_leader_translator"])
+        key = "sc_significant" if sc_p < 0.05 else "sc_not_significant"
+        return t[key].format(p=sc_p, leader=leader,
+                             wins_o=sc_wins_o, wins_t=sc_wins_t)
+
+    # 返回给 GUI 等调用方的结论文字恒为中文；report.md 按 report_lang 渲染。
+    conclusion_zh = _conclusion(REPORT_TEMPLATES_ZH)
+    nn_conclusion_zh = _nn_conclusion(REPORT_TEMPLATES_ZH)
+    sc_conclusion_zh = _sc_conclusion(REPORT_TEMPLATES_ZH)
+    if report_lang == "zh":
+        T = REPORT_TEMPLATES_ZH
+        conclusion = conclusion_zh
+        nn_conclusion = nn_conclusion_zh
+        sc_conclusion = sc_conclusion_zh
     else:
-        conclusion = (
-            f"同译者对相似度（{same_mean:.4f}）高于跨译者对"
-            f"（{cross_mean_sim:.4f}），但差异未达统计显著"
-            f"（Wilcoxon p={p_wilcoxon:.4f}，置换检验 p={p_perm:.4f}，"
-            f"Cohen's d={d_val:.3f}）。"
-        )
+        T = REPORT_TEMPLATES_EN
+        conclusion = _conclusion(T)
+        nn_conclusion = _nn_conclusion(T)
+        sc_conclusion = _sc_conclusion(T)
 
     ratio_str = f"{delta_ratio:.2f}" if math.isfinite(delta_ratio) else "inf (within=0)"
     delta_warning: List[str] = []
     if not (math.isfinite(delta_ratio) and delta_ratio > 1.1):
         delta_warning = [
             "",
-            "> ⚠ **Sanity check**: cross/within Delta ratio is "
-            f"{ratio_str} (≤ 1.1) —— Burrows' Delta 未检测到组间分离。"
-            "可能原因：切片过短、语料过于同质、或高频特征被内容噪声主导。"
-            "请勿将阴性 Delta 直接解读为「无译者风格」，"
-            "结论应结合下方指纹相似度与统计检验综合判断。",
+            T["delta_warning"].format(ratio=ratio_str),
         ]
-
-    # ── 1-NN 留一法结论（中文模板）──
-    if nn_accuracy > nn_baseline:
-        nn_conclusion = (
-            f"1-NN 留一法分类准确率 {nn_accuracy:.1%}，高于随机基线 "
-            f"{nn_baseline:.1%}：基于 Delta 距离的最近邻能稳定找回同组样本，"
-            "组间风格信号可识别。"
-        )
-    else:
-        nn_conclusion = (
-            f"1-NN 留一法分类准确率 {nn_accuracy:.1%}，未超过随机基线 "
-            f"{nn_baseline:.1%}：Delta 距离不足以区分各组。"
-        )
-
-    # ── 信号竞争检验结论（中文模板）──
-    if sc_wins_o + sc_wins_t == 0:
-        sc_conclusion = "无可配对篇目，信号竞争检验未执行。"
-    else:
-        leader = "原文" if sc_wins_o >= sc_wins_t else "译者"
-        if sc_p < 0.05:
-            sc_conclusion = (
-                f"符号检验显著（p={sc_p:.4f}）：{leader}信号强于对方"
-                f"（原文信号胜 {sc_wins_o} 次，译者信号胜 {sc_wins_t} 次）。"
-            )
-        else:
-            sc_conclusion = (
-                f"符号检验不显著（p={sc_p:.4f}）：原文信号胜 {sc_wins_o} 次，"
-                f"译者信号胜 {sc_wins_t} 次，两种信号的差异未达统计显著。"
-            )
 
     if sc_orphans:
         shown = sc_orphans[:20]
@@ -492,7 +592,7 @@ def run(
         f"- Permutation test ({perm_n} iterations): p = **{p_perm:.4f}**",
         f"- Cohen's d = **{d_val:.3f}** ({_effect_size_note(d_val)})",
         "",
-        "## 结论",
+        T["sec_conclusion"],
         "",
         conclusion,
         "",
@@ -518,8 +618,9 @@ def run(
         "sc_ties": sc_ties,
         "sc_orphans": sc_orphans,
         "sc_p_value": sc_p,
-        "nn_conclusion": nn_conclusion,
-        "sc_conclusion": sc_conclusion,
+        # report.md 结论段的中文模板文字，供 GUI 等调用方直接展示
+        "nn_conclusion": nn_conclusion_zh,
+        "sc_conclusion": sc_conclusion_zh,
         "same_sim_mean": same_mean,
         "cross_sim_mean": cross_mean_sim,
         "p_wilcoxon": p_wilcoxon,
@@ -527,7 +628,7 @@ def run(
         "cohens_d": d_val,
         "significant": significant,
         # report.md 结论段的中文模板文字，供 GUI 等调用方直接展示
-        "conclusion": conclusion,
+        "conclusion": conclusion_zh,
     }
 
 
@@ -546,6 +647,9 @@ def main() -> None:
     parser.add_argument("--lang", default="en", choices=["en", "zh"],
                         help="sample language for fingerprint features "
                              "(default en)")
+    parser.add_argument("--report-lang", default="zh", choices=["zh", "en"],
+                        help="template language of report.md (default zh; "
+                             "numbers and tables are identical either way)")
     args = parser.parse_args()
 
     input_dir = Path(args.input)
@@ -556,7 +660,7 @@ def main() -> None:
 
     try:
         run(input_dir, Path(args.out), top_n=args.top_n,
-            perm_n=args.perm_n, lang=args.lang)
+            perm_n=args.perm_n, lang=args.lang, report_lang=args.report_lang)
     except ValueError as e:
         print(f"error: {e}", file=sys.stderr)
         sys.exit(1)

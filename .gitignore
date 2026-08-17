@@ -1,4 +1,4 @@
-﻿__pycache__/
+__pycache__/
 *.pyc
 _data/
 venv/
@@ -11,3 +11,7 @@ dist/
 # 实验输出（由 experiments/run_delta.py 生成）
 experiments/output/
 results_test/
+
+# 实验语料与输出（语料受版权保护，不入库）
+corpus/
+experiment_output/
