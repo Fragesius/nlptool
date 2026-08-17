@@ -98,6 +98,31 @@ def make_labeled_text(parent, label: str, mono: bool = True,
     return tb
 
 
+def add_copy_button(parent, getter, label: str = "📋 复制") -> ctk.CTkButton:
+    """在结果卡片底部加一个复制按钮：把 getter() 的文本写入剪贴板。"""
+    bar = ctk.CTkFrame(parent, fg_color="transparent")
+    bar.pack(fill="x", padx=12, pady=(0, 8))
+    btn = flat_btn(bar, text=label, width=84, height=26, command=None)
+
+    def _copy() -> None:
+        text = getter() or ""
+        if not text.strip():
+            return
+        btn.clipboard_clear()
+        btn.clipboard_append(text)
+        btn.configure(text="✓ 已复制")
+        btn.after(1500, lambda: btn.configure(text=label))
+
+    btn.configure(command=_copy)
+    btn.pack(side="right")
+    return btn
+
+
+def textbox_getter(tb: ctk.CTkTextbox):
+    """返回读取 CTkTextbox 全部内容的 getter。"""
+    return lambda: tb.get("1.0", "end-1c")
+
+
 def embed_figure(parent: tk.Widget, fig: Figure) -> None:
     """将 matplotlib Figure 嵌入可滚动容器中。"""
     # 关闭所有旧 Figure，防止内存泄漏
@@ -174,6 +199,7 @@ class BasicTab(ctk.CTkFrame):
         card.grid(row=1, column=0, sticky="ew", padx=10, pady=4)
         summary_h = 90 if is_compact_mode() else 120
         self.summary = make_labeled_text(card, "", height=summary_h)
+        add_copy_button(card, textbox_getter(self.summary))
 
         # ── 结果展示：分词 + 词频 双栏 ──
         result_card = Card(self, "🔤 分词与词频")
@@ -222,6 +248,7 @@ class BasicTab(ctk.CTkFrame):
         self.kwic_export_btn.pack(side="left", padx=(8, 0))
 
         self.kwic_text = make_labeled_text(kwic_card, "", height=140)
+        add_copy_button(kwic_card, textbox_getter(self.kwic_text))
         self._kwic_last: list = []
 
         self._last: Optional[analyzer.BasicResult] = None
@@ -393,17 +420,22 @@ class SyntaxTab(ctk.CTkFrame):
         self.api_tab = nb.tab(self._SUB_TITLES["api"])
 
         self.ner_text = make_labeled_text(self.ner_tab, "命名实体  —  实体 / 类型")
+        add_copy_button(self.ner_tab, textbox_getter(self.ner_text))
         self.kw_text = make_labeled_text(self.kw_tab, "关键词  —  词语 / 权重")
+        add_copy_button(self.kw_tab, textbox_getter(self.kw_text))
 
         # ── 依存句法：文字列表（可视化请在「可视化」标签查看树图）──
         self.dep_text = make_labeled_text(
             self.dep_tab,
             "依存关系  —  词元(词性)  ──依存──▶  head(head词性)"
         )
+        add_copy_button(self.dep_tab, textbox_getter(self.dep_text))
         self._dep_sentences: list[list[dict]] = []
 
         self.sent_text = make_labeled_text(self.sent_tab, "情感得分  —  -1 负向  ~  1 正向")
+        add_copy_button(self.sent_tab, textbox_getter(self.sent_text))
         self.api_text = make_labeled_text(self.api_tab, "AI 返回结果")
+        add_copy_button(self.api_tab, textbox_getter(self.api_text))
 
         taskbar = ctk.CTkFrame(self.api_tab, fg_color="transparent")
         taskbar.pack(fill="x", padx=12, pady=(4, 2))
@@ -651,6 +683,7 @@ class CompareTab(ctk.CTkFrame):
         out_card = Card(self, "📋 结果输出")
         out_card.grid(row=2, column=0, sticky="nsew", padx=10, pady=(4, 10))
         self.out = make_labeled_text(out_card, "")
+        add_copy_button(out_card, textbox_getter(self.out))
 
     def run_readability(self) -> None:
         text = self.app.get_text()
@@ -789,6 +822,7 @@ class HistoryTab(ctk.CTkFrame):
         detail_card.grid(row=2, column=0, sticky="ew", padx=10, pady=(4, 10))
         detail_h = 100 if is_compact_mode() else 150
         self.detail = make_labeled_text(detail_card, "", mono=False, height=detail_h)
+        add_copy_button(detail_card, textbox_getter(self.detail))
 
         self._entries: list[history.HistoryEntry] = []
         self.refresh()
@@ -1020,19 +1054,21 @@ class _InputRow:
         inner = ctk.CTkFrame(self.frame, fg_color="transparent")
         inner.pack(fill="x", padx=12, pady=(6, 10))
 
-        self.file_btn = flat_btn(inner, text="📂 选择文件", command=self._load_file)
+        self.file_btn = flat_btn(inner, text="📂 选择文件", width=100,
+                                 command=self._load_file)
         self.file_btn.pack(side="left", padx=(0, 4))
 
-        self.paste_btn = flat_btn(inner, text="📋 粘贴文本", command=self._paste_text)
+        self.paste_btn = flat_btn(inner, text="📋 粘贴文本", width=100,
+                                  command=self._paste_text)
         self.paste_btn.pack(side="left", padx=(0, 8))
 
         self.status_label = ctk.CTkLabel(
-            inner, text="尚未加载文本",
+            inner, text="未加载文本",
             font=s.font("footnote"), text_color=s.MUTED,
         )
         self.status_label.pack(side="left")
 
-        self.clear_btn = flat_btn(inner, text="✕ 清除", width=80,
+        self.clear_btn = flat_btn(inner, text="✕", width=36,
                                   command=self._clear)
         self.clear_btn.pack(side="right")
 
@@ -1115,7 +1151,7 @@ class _InputRow:
     # ── 清除 ──
     def _clear(self) -> None:
         self._text = ""
-        self.status_label.configure(text="尚未加载文本", text_color=s.MUTED)
+        self.status_label.configure(text="未加载文本", text_color=s.MUTED)
         if self.on_change:
             self.on_change()
 
@@ -1150,7 +1186,7 @@ class _ControlRow(_InputRow):
         self.on_remove_cb = on_remove
 
         # 把清除按钮换成移除按钮
-        self.clear_btn.configure(text="✕ 移除", command=self._remove)
+        self.clear_btn.configure(command=self._remove)
 
     def _remove(self) -> None:
         self.destroy()
@@ -1164,10 +1200,10 @@ class _ControlRow(_InputRow):
 # ── FingerprintTab ──────────────────────────────────────────
 
 
-class FingerprintTab(ctk.CTkScrollableFrame):
+class FingerprintTab(ctk.CTkFrame):
     """语言指纹分析标签页。
 
-    布局：紧凑文件选择行 → 图表 → 详细报告。
+    左右双栏布局：左侧=相似度图与详细报告，右侧=输入设置与运行控制。
     """
 
     def __init__(self, master, app) -> None:
@@ -1175,9 +1211,23 @@ class FingerprintTab(ctk.CTkScrollableFrame):
         self.app = app
         self.control_rows: list[_ControlRow] = []
 
+        self.grid_columnconfigure(0, weight=1)
+        self.grid_columnconfigure(1, weight=0, minsize=420)
+        self.grid_rowconfigure(0, weight=1)
+
+        # ══ 左栏：结果展示（图表 + 报告）══
+        left = ctk.CTkFrame(self, fg_color="transparent")
+        left.grid(row=0, column=0, sticky="nsew", padx=(10, 4), pady=10)
+        left.grid_columnconfigure(0, weight=1)
+        left.grid_rowconfigure(1, weight=1)
+
+        # ══ 右栏：输入设置 + 运行控制（可滚动）══
+        right = ctk.CTkScrollableFrame(self, fg_color="transparent", width=400)
+        right.grid(row=0, column=1, sticky="nsew", padx=(4, 10), pady=10)
+
         # ── 运行控制 ──
-        ctrl_card = Card(self, "▶ 运行控制")
-        ctrl_card.pack(fill="x", padx=10, pady=(10, 4))
+        ctrl_card = Card(right, "▶ 运行控制")
+        ctrl_card.pack(fill="x", padx=6, pady=(4, 4))
         ctrl = ctk.CTkFrame(ctrl_card, fg_color="transparent")
         ctrl.pack(fill="x", padx=12, pady=(6, 10))
         self.run_btn = accent_btn(ctrl, text="▶ 运行语言指纹分析",
@@ -1188,36 +1238,36 @@ class FingerprintTab(ctk.CTkScrollableFrame):
         self.export_btn.pack(side="left", padx=(8, 0))
         self._runner = TaskRunner(self)
         self._last: Optional[linguistic_fingerprint.FingerprintResult] = None
-        ctk.CTkLabel(
-            ctrl,
-            text="  |  加载文件或粘贴文本，支持 txt / docx / pdf / html / rtf 等格式",
-            font=s.font("footnote"), text_color=s.MUTED,
-        ).pack(side="left", padx=8)
+        hint_label(
+            ctrl_card,
+            "支持加载文件或直接粘贴文本（txt / docx / pdf / html / rtf 等）",
+            pady=(0, 8),
+        )
 
         # ── 输入设置：可疑文本 A ──
         self.row_a = _InputRow(
-            self, "可疑文本 A（≥3000 字符）", "📝", min_chars=3000,
+            right, "可疑文本 A（≥3000 字符）", "📝", min_chars=3000,
             on_change=self._update_status,
         )
 
         # ── 嫌疑作者 B ──
         self.row_b = _InputRow(
-            self, "嫌疑作者 B 的已知作品", "👤", on_change=self._update_status,
+            right, "嫌疑作者 B 的已知作品", "👤", on_change=self._update_status,
         )
 
         # ── 对照作者容器 ──
-        self.controls_container = ctk.CTkFrame(self, fg_color="transparent")
+        self.controls_container = ctk.CTkFrame(right, fg_color="transparent")
         self.controls_container.pack(fill="x", padx=0, pady=0)
 
         # 添加对照按钮
-        add_frame = ctk.CTkFrame(self, fg_color="transparent")
+        add_frame = ctk.CTkFrame(right, fg_color="transparent")
         add_frame.pack(fill="x", padx=10, pady=(2, 4))
         self.add_btn = flat_btn(add_frame, text="+ 添加对照作者",
                                 command=self._add_control)
         self.add_btn.pack(side="left")
         ctk.CTkLabel(
             add_frame,
-            text="  添加同性别、同类型、同时期的其他作家作品作为对照",
+            text="  建议选同性别、同类型、同时期的作家",
             font=s.font("caption"), text_color=s.MUTED,
         ).pack(side="left", padx=6)
 
@@ -1225,22 +1275,22 @@ class FingerprintTab(ctk.CTkScrollableFrame):
         self._add_control()
 
         # ── 结果展示：图表区域 ──
-        self.chart_frame = Card(self, "📊 相似度对比图")
-        self.chart_frame.pack(fill="x", padx=10, pady=(6, 2))
+        self.chart_frame = Card(left, "📊 相似度对比图")
+        self.chart_frame.grid(row=0, column=0, sticky="ew", pady=(0, 4))
         self.chart_holder = ctk.CTkFrame(self.chart_frame, fg_color="transparent",
                                          height=260)
         self.chart_holder.pack(fill="x", padx=8, pady=8)
         self.chart_holder.pack_propagate(False)
 
         # ── 结果展示：详细报告 ──
-        self.report_frame = Card(self, "📋 详细报告")
-        self.report_frame.pack(fill="x", padx=10, pady=(4, 10))
+        self.report_frame = Card(left, "📋 详细报告")
+        self.report_frame.grid(row=1, column=0, sticky="nsew", pady=(4, 0))
         self.results_text = ctk.CTkTextbox(
             self.report_frame, wrap="word",
             font=s.font("footnote" if is_compact_mode() else "body"),
-            height=220,
         )
-        self.results_text.pack(fill="x", padx=12, pady=(4, 10))
+        self.results_text.pack(fill="both", expand=True, padx=12, pady=(4, 4))
+        add_copy_button(self.report_frame, textbox_getter(self.results_text))
         # 初始提示
         self.results_text.insert(
             "end",
@@ -1443,8 +1493,10 @@ class BatchTab(ctk.CTkFrame):
 
         self._list_body = ctk.CTkScrollableFrame(table_card, fg_color="transparent")
         self._list_body.pack(fill="both", expand=True, padx=4, pady=(0, 8))
+        add_copy_button(table_card, lambda: self._report_text)
 
         self._files: list[str] = []
+        self._report_text = ""
 
     def _add_row(self, values: tuple) -> None:
         row = ctk.CTkFrame(self._list_body, fg_color="transparent")
@@ -1487,6 +1539,7 @@ class BatchTab(ctk.CTkFrame):
     def _on_result(self, results: list) -> None:
         self._results = results
         clear_widget(self._list_body)
+        lines = ["\t".join(name for name, _ in self._COLUMNS)]
         for item in results:
             if item.status == "ok":
                 top = ", ".join(f"{w}({c})" for w, c in item.top_words)
@@ -1498,6 +1551,8 @@ class BatchTab(ctk.CTkFrame):
             else:
                 values = (item.filename, "✗", "", "", "", "", "", item.error)
             self._add_row(values)
+            lines.append("\t".join(str(v) for v in values))
+        self._report_text = "\n".join(lines)
 
         ok_count = sum(1 for r in results if r.status == "ok")
         self.export_btn.configure(state="normal")
@@ -1519,9 +1574,10 @@ class BatchTab(ctk.CTkFrame):
 # --------------------------------------------------------------------------- #
 
 
-class ExperimentTab(ctk.CTkScrollableFrame):
+class ExperimentTab(ctk.CTkFrame):
     """批量分组实验标签页：可选切片 + Burrows' Delta + 语言指纹统计检验。
 
+    左右双栏布局：左侧=结果摘要，右侧=输入设置与运行控制。
     GUI 只负责收集参数、调用 experiments 包的核心函数并展示结果，
     不复制任何实验逻辑。
     """
@@ -1531,10 +1587,23 @@ class ExperimentTab(ctk.CTkScrollableFrame):
         self.app = app
         self._runner = TaskRunner(self)
         self._out_dir: Optional[str] = None
+        self._report_text = ""
+
+        self.grid_columnconfigure(0, weight=1)
+        self.grid_columnconfigure(1, weight=0, minsize=420)
+        self.grid_rowconfigure(0, weight=1)
+
+        # ══ 右栏：输入设置 + 运行控制（可滚动）══
+        right = ctk.CTkScrollableFrame(self, fg_color="transparent", width=400)
+        right.grid(row=0, column=1, sticky="nsew", padx=(4, 10), pady=10)
+
+        # ══ 左栏：结果展示（可滚动，小窗口也能看到复制按钮）══
+        left = ctk.CTkScrollableFrame(self, fg_color="transparent")
+        left.grid(row=0, column=0, sticky="nsew", padx=(10, 4), pady=10)
 
         # ══ 输入设置 ══
-        input_card = Card(self, "📥 输入设置")
-        input_card.pack(fill="x", padx=10, pady=(10, 4))
+        input_card = Card(right, "📥 输入设置")
+        input_card.pack(fill="x", padx=6, pady=(4, 4))
 
         # ── 语料目录 ──
         row1 = ctk.CTkFrame(input_card, fg_color="transparent")
@@ -1572,34 +1641,36 @@ class ExperimentTab(ctk.CTkScrollableFrame):
 
         # ── 选项行：切片词数 + 运行模式 ──
         opts = ctk.CTkFrame(input_card, fg_color="transparent")
-        opts.pack(fill="x", padx=12, pady=(2, 10))
+        opts.pack(fill="x", padx=12, pady=(2, 4))
         ctk.CTkLabel(opts, text="切片词数：", font=s.font("body")).pack(side="left")
         self.chunk_var = tk.StringVar(value="2000")
         ctk.CTkEntry(opts, textvariable=self.chunk_var, width=80,
                      font=s.font("body")).pack(side="left", padx=(4, 12))
-
-        self.mode_var = tk.StringVar(value="slice")
-        ctk.CTkRadioButton(
-            opts, text="切片后实验（长文本）",
-            variable=self.mode_var, value="slice",
-            font=s.font("body"),
-        ).pack(side="left", padx=(0, 8))
-        ctk.CTkRadioButton(
-            opts, text="直接实验（已切好/短文本）",
-            variable=self.mode_var, value="direct",
-            font=s.font("body"),
-        ).pack(side="left")
 
         self.clean_var = tk.BooleanVar(value=True)
         ctk.CTkCheckBox(
             opts, text="运行前清空输出目录",
             variable=self.clean_var,
             font=s.font("body"),
-        ).pack(side="left", padx=(12, 0))
+        ).pack(side="left")
+
+        mode_row = ctk.CTkFrame(input_card, fg_color="transparent")
+        mode_row.pack(fill="x", padx=12, pady=(0, 10))
+        self.mode_var = tk.StringVar(value="slice")
+        ctk.CTkRadioButton(
+            mode_row, text="切片后实验（长文本）",
+            variable=self.mode_var, value="slice",
+            font=s.font("body"),
+        ).pack(side="left", padx=(0, 8))
+        ctk.CTkRadioButton(
+            mode_row, text="直接实验（已切好/短文本）",
+            variable=self.mode_var, value="direct",
+            font=s.font("body"),
+        ).pack(side="left")
 
         # ══ 运行控制 ══
-        ctrl_card = Card(self, "▶ 运行控制")
-        ctrl_card.pack(fill="x", padx=10, pady=4)
+        ctrl_card = Card(right, "▶ 运行控制")
+        ctrl_card.pack(fill="x", padx=6, pady=4)
 
         ctrl = ctk.CTkFrame(ctrl_card, fg_color="transparent")
         ctrl.pack(fill="x", padx=12, pady=(6, 4))
@@ -1623,13 +1694,12 @@ class ExperimentTab(ctk.CTkScrollableFrame):
         self._progress_queue: "queue.Queue[tuple]" = queue.Queue()
 
         # ══ 结果展示：摘要网格 ══
-        result_card = Card(self, "📋 实验结果摘要")
-        result_card.pack(fill="x", padx=10, pady=(4, 10))
+        result_card = Card(left, "📋 实验结果摘要")
+        result_card.pack(fill="both", expand=True)
 
         self.metrics_grid = ctk.CTkFrame(result_card, fg_color="transparent")
         self.metrics_grid.pack(fill="x", padx=12, pady=(6, 4))
         self.metrics_grid.grid_columnconfigure(1, weight=1)
-        self.metrics_grid.grid_columnconfigure(3, weight=1)
 
         self._placeholder_label = ctk.CTkLabel(
             self.metrics_grid,
@@ -1644,40 +1714,40 @@ class ExperimentTab(ctk.CTkScrollableFrame):
             font=s.font("body"), text_color=s.MUTED,
             anchor="w", justify="left",
         )
-        self._placeholder_label.grid(row=0, column=0, columnspan=4,
+        self._placeholder_label.grid(row=0, column=0, columnspan=2,
                                      sticky="w", pady=4)
 
         self.conclusion_label = ctk.CTkLabel(
             result_card, text="",
             font=s.font("body", bold=True),
-            anchor="w", justify="left", wraplength=820,
+            anchor="w", justify="left", wraplength=560,
         )
         self.conclusion_label.pack(fill="x", padx=12, pady=(4, 2))
 
         self.out_dir_label = ctk.CTkLabel(
             result_card, text="",
             font=s.font("footnote"), text_color=s.MUTED,
-            anchor="w", justify="left", wraplength=820,
+            anchor="w", justify="left", wraplength=560,
         )
-        self.out_dir_label.pack(fill="x", padx=12, pady=(0, 10))
+        self.out_dir_label.pack(fill="x", padx=12, pady=(0, 4))
+        add_copy_button(result_card, lambda: self._report_text,
+                        label="📋 复制摘要")
 
     # ── 指标网格 ──
     def _metric(self, index: int, name: str, value: str,
                 color=None) -> None:
-        """在双栏网格中添加一行指标（显著=绿、不显著=灰）。"""
-        row, lane = divmod(index, 2)
-        c0 = lane * 2
+        """在单列网格中添加一行指标（显著=绿、不显著=灰）。"""
         ctk.CTkLabel(
             self.metrics_grid, text=name,
             font=s.font("footnote"), text_color=s.MUTED,
-            anchor="e", width=170,
-        ).grid(row=row, column=c0, sticky="e", padx=(4, 6), pady=2)
+            anchor="e", width=180,
+        ).grid(row=index, column=0, sticky="e", padx=(4, 8), pady=2)
         ctk.CTkLabel(
             self.metrics_grid, text=value,
             font=s.font("body", bold=True, mono=True),
             text_color=color if color is not None else s.TEXT,
-            anchor="w",
-        ).grid(row=row, column=c0 + 1, sticky="w", padx=(0, 24), pady=2)
+            anchor="w", justify="left", wraplength=400,
+        ).grid(row=index, column=1, sticky="w", padx=(0, 8), pady=2)
 
     @staticmethod
     def _sig_color(p: float) -> tuple:
@@ -1847,6 +1917,14 @@ class ExperimentTab(ctk.CTkScrollableFrame):
         ]
         for i, (name, value, color) in enumerate(metrics):
             self._metric(i, name, value, color)
+
+        # 纯文本摘要（供「复制摘要」按钮分享）
+        self._report_text = "\n".join(
+            ["批量实验结果摘要", ""]
+            + [f"{name}：{value}" for name, value, _ in metrics]
+            + ["", f"【结论】{stats['conclusion']}",
+               f"输出目录：{out_dir}"]
+        )
 
         self.conclusion_label.configure(text=f"【结论】{stats['conclusion']}")
         self.out_dir_label.configure(text=f"完整报告与图表见输出目录：{out_dir}")

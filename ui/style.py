@@ -50,15 +50,15 @@ FONT = "Microsoft YaHei UI"           # 系统 UI 字体
 FONT_MONO = "Consolas"                # 等宽字体（结果区）
 
 FONT_SCALE = {
-    "largeTitle":   20,   # 屏幕标题
-    "title":        17,   # 区域标题
-    "title2":       15,   # 子区域标题
-    "title3":       13,   # 分组标题
-    "headline":     11,   # 行标题
-    "body":         10,   # 正文
-    "callout":      10,   # 次要内容
-    "footnote":      9,   # 辅助文字
-    "caption":       8,   # 小标签
+    "largeTitle":   22,   # 屏幕标题
+    "title":        19,   # 区域标题
+    "title2":       17,   # 子区域标题
+    "title3":       15,   # 分组标题
+    "headline":     13,   # 行标题
+    "body":         12,   # 正文
+    "callout":      11,   # 次要内容
+    "footnote":     10,   # 辅助文字
+    "caption":       9,   # 小标签
 }
 
 

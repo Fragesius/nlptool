@@ -164,19 +164,26 @@ class App:
     # 主体
     # ----------------------------------------------------------------- #
 
+    # 不使用主输入栏的标签页（内容占满全宽）
+    _NO_INPUT_TABS = {"fingerprint", "experiment", "batch", "history"}
+
     def _build_body(self) -> None:
         body_padx = responsive_padding(12)
         body_pady = (responsive_padding(8), responsive_padding(4))
         body = ctk.CTkFrame(self.root, fg_color="transparent")
         body.pack(fill="both", expand=True, padx=body_padx, pady=body_pady)
-        body.grid_columnconfigure(0, weight=42, minsize=380)
-        body.grid_columnconfigure(1, weight=58)
+        self._body = body
+        # 左栏固定像素宽：切换标签页时输入栏宽度恒定，不随右页内容跳动
+        self._left_width = 340 if self._compact else 400
+        body.grid_columnconfigure(0, weight=0, minsize=self._left_width)
+        body.grid_columnconfigure(1, weight=1)
         body.grid_rowconfigure(0, weight=1)
 
         # ── 左面板：输入卡片 ──
         left = ctk.CTkFrame(body, fg_color=s.CARD, corner_radius=10,
                             border_width=1, border_color=s.BORDER)
         left.grid(row=0, column=0, sticky="nsew", padx=(0, 6))
+        self._left_panel = left
         left.grid_rowconfigure(2, weight=1)
         left.grid_columnconfigure(0, weight=1)
 
@@ -244,6 +251,15 @@ class App:
         )
         nb.grid(row=0, column=1, sticky="nsew", padx=(6, 0))
         self.tabview = nb
+        # CTkTabview.set() 不触发 command 回调：包装 set()，让程序化切页
+        # （含点击、select_tab、脚本调用）都走同一套左面板显隐逻辑。
+        _orig_tab_set = nb.set
+
+        def _set_and_sync(title: str) -> None:
+            _orig_tab_set(title)
+            self._on_tab_changed()
+
+        nb.set = _set_and_sync
 
         if self._compact:
             tab_titles = {
@@ -259,6 +275,7 @@ class App:
                 "fingerprint": "🔬 语言指纹", "experiment": "🧪 批量实验",
             }
         self._tab_titles = tab_titles
+        self._title_to_key = {v: k for k, v in tab_titles.items()}
 
         tab_classes = [
             ("basic", BasicTab), ("syntax", SyntaxTab), ("compare", CompareTab),
@@ -279,6 +296,23 @@ class App:
                 self.tabview.set(title)
             except Exception:
                 pass
+            # CTkTabview.set() 不触发 command 回调，手动同步一次
+            self._on_tab_changed()
+
+    def _on_tab_changed(self) -> None:
+        """标签页切换：语言指纹/批量实验等不使用主输入栏的页隐藏左面板。"""
+        if not hasattr(self, "_title_to_key"):
+            return
+        key = self._title_to_key.get(self.tabview.get(), "")
+        if key == getattr(self, "_last_tab_key", None):
+            return
+        self._last_tab_key = key
+        if key in self._NO_INPUT_TABS:
+            self._left_panel.grid_remove()
+            self._body.grid_columnconfigure(0, minsize=0)
+        else:
+            self._body.grid_columnconfigure(0, minsize=self._left_width)
+            self._left_panel.grid()
 
     def _set_input_color(self, placeholder: bool) -> None:
         self.text.configure(text_color=s.resolve(s.MUTED if placeholder else s.TEXT))
