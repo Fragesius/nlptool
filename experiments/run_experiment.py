@@ -41,10 +41,12 @@ from core.stylometry import (  # noqa: E402
     delta_matrix,
     hierarchical_cluster,
 )
+from core.analyzer import tokenize_many  # noqa: E402
 from core.linguistic_fingerprint import (  # noqa: E402
     SegmentInfo,
     build_global_vocab,
     extract_features,
+    extract_sentence_stats_many,
     weighted_cosine_similarity,
     wilcoxon_signed_rank_test,
     permutation_test,
@@ -206,14 +208,23 @@ def run(
     # ------------------------------------------------------------------
     # (c) Pairwise linguistic fingerprint similarity
     # ------------------------------------------------------------------
-    vocab = build_global_vocab(list(texts.values()), lang)
+    # 性能重构（v2.0.0）：每个样本只分词一次、只提取一次特征。
+    # - tokenize_many：英文走 spaCy nlp.pipe 批处理，结果与逐条分词一致；
+    # - extract_sentence_stats_many：全部句子一次性批量分词；
+    # - 预分词结果同时供 build_global_vocab 与 extract_features 复用，
+    #   避免旧路径中"建词汇表一遍、提特征又一遍"的重复分词。
+    text_list = [texts[label] for label in labels]
+    token_list = tokenize_many(text_list, lang)
+    sent_stats_list = extract_sentence_stats_many(text_list, lang)
+
+    vocab = build_global_vocab(text_list, lang, tokenized=token_list)
     fvs = {}
-    for label in labels:
-        text = texts[label]
+    for label, text, toks, sst in zip(labels, text_list, token_list,
+                                      sent_stats_list):
         seg = SegmentInfo(
             text=text, segment_index=0, char_count=len(text), lang=lang
         )
-        fvs[label] = extract_features(seg, vocab)
+        fvs[label] = extract_features(seg, vocab, tokens=toks, sent_stats=sst)
 
     # Similarity of every unordered pair, grouped by same/cross translator.
     sim_pair: Dict[Tuple[str, str], float] = {}

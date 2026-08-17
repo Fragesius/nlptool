@@ -195,6 +195,10 @@ class FeatureVector:
     hapax_ratio: float = 0.0   # Hapax Legomena 比例（仅出现一次的词的占比）
     raw_vector: List[float] = field(default_factory=list)
     segment_index: int = 0
+    # 各向量维度的 L2 范数缓存（键为维度名）。
+    # 两两相似度场景下同一向量的范数被重复使用 O(n) 次，缓存后只算一次；
+    # 范数计算公式与 cosine_similarity 内部完全一致，结果零变化。
+    _norms: Dict[str, float] = field(default_factory=dict, repr=False, compare=False)
 
 
 # ── 分维度权重 ──────────────────────────────────────────────
@@ -515,22 +519,20 @@ def extract_word_bigrams(
     return result
 
 
-def extract_sentence_stats(text: str, lang: str) -> Tuple[float, float]:
-    """句长均值与标准差（按词数计）。"""
-    sents = split_sentences(text)
-    if not sents:
-        return (0.0, 0.0)
-
+def _sent_word_counts(sents_tokens: List[List[Token]]) -> List[int]:
+    """由每句的分词结果统计各句词数（过滤标点与空词元）。"""
     lengths = []
-    for sent in sents:
-        tokens = tokenize(sent, lang)
+    for tokens in sents_tokens:
         word_count = sum(1 for t in tokens if not _is_punct(t.text) and t.text.strip())
         if word_count > 0:
             lengths.append(word_count)
+    return lengths
 
+
+def _mean_std_from_lengths(lengths: List[int]) -> Tuple[float, float]:
+    """句长列表 → (均值, 样本标准差)。空列表返回 (0.0, 0.0)。"""
     if not lengths:
         return (0.0, 0.0)
-
     n = len(lengths)
     mean = sum(lengths) / n
     if n > 1:
@@ -539,6 +541,41 @@ def extract_sentence_stats(text: str, lang: str) -> Tuple[float, float]:
     else:
         std = 0.0
     return (mean, std)
+
+
+def extract_sentence_stats(text: str, lang: str) -> Tuple[float, float]:
+    """句长均值与标准差（按词数计）。"""
+    sents = split_sentences(text)
+    if not sents:
+        return (0.0, 0.0)
+    lengths = _sent_word_counts([tokenize(sent, lang) for sent in sents])
+    return _mean_std_from_lengths(lengths)
+
+
+def extract_sentence_stats_many(
+    texts: List[str], lang: str
+) -> List[Tuple[float, float]]:
+    """批量版 ``extract_sentence_stats``：结果与逐文本调用完全一致。
+
+    全部文本的句子收集后一次性批量分词（英文走 spaCy ``nlp.pipe``），
+    避免"每句一次 spaCy 调用"的巨量开销；均值/标准差公式不变。
+    """
+    from core.analyzer import tokenize_many  # 延迟导入，避免循环依赖
+
+    sent_lists = [split_sentences(t) for t in texts]
+    flat = [s for sents in sent_lists for s in sents]
+    flat_tokens = tokenize_many(flat, lang) if flat else []
+
+    results: List[Tuple[float, float]] = []
+    pos = 0
+    for sents in sent_lists:
+        if not sents:
+            results.append((0.0, 0.0))
+            continue
+        sents_tokens = flat_tokens[pos : pos + len(sents)]
+        pos += len(sents)
+        results.append(_mean_std_from_lengths(_sent_word_counts(sents_tokens)))
+    return results
 
 
 def extract_punct_dist(text: str, lang: str, global_vocab: List[str]) -> List[float]:
@@ -601,16 +638,24 @@ def build_global_vocab(
     top_n_ngram: int = 100,
     top_n_bigram: int = 50,
     top_n_punct: int = 20,
+    tokenized: Optional[List[List[Token]]] = None,
 ) -> dict:
     """扫描所有文本，建立全局虚词 / n-gram / bigram / 标点词汇表。
 
     确保每个片段的特征向量维度一致。
     性能优化：每个文本只 tokenize 一次，结果缓存复用。
+
+    :param tokenized: 可选的预分词结果（与 ``texts`` 一一对应），
+                      由调用方批量分词后传入以避免重复分词；
+                      为 None 时内部逐文本分词（行为与旧版一致）。
     """
     # --- 预分词：每个文本只调用一次 tokenize，避免重复 ---
-    tokenized_cache: List[List[Token]] = []
-    for text in texts:
-        tokenized_cache.append(tokenize(text, lang))
+    if tokenized is None:
+        tokenized_cache: List[List[Token]] = []
+        for text in texts:
+            tokenized_cache.append(tokenize(text, lang))
+    else:
+        tokenized_cache = tokenized
 
     # --- 虚词：取全局频率最高的 top_n_func 个 ---
     func_set = get_func_words(lang)
@@ -672,16 +717,33 @@ def build_global_vocab(
 # =============================================================================
 
 
-def extract_features(segment: SegmentInfo, global_vocab: dict) -> FeatureVector:
-    """对单个片段提取全部特征。"""
-    tokens = _tokens_from_text(segment.text, segment.lang)
+def extract_features(
+    segment: SegmentInfo,
+    global_vocab: dict,
+    tokens: Optional[List[Token]] = None,
+    sent_stats: Optional[Tuple[float, float]] = None,
+) -> FeatureVector:
+    """对单个片段提取全部特征。
+
+    :param tokens: 可选的预分词结果（须为 ``tokenize(segment.text,
+                   segment.lang)`` 的结果）；为 None 时内部分词。
+    :param sent_stats: 可选的预算句长统计（须为
+                   ``extract_sentence_stats(segment.text, segment.lang)``
+                   的结果）；为 None 时内部计算。
+    """
+    if tokens is None:
+        tokens = _tokens_from_text(segment.text, segment.lang)
     lang = segment.lang
 
     wld = extract_word_length_dist(tokens, lang)
     fwf = extract_function_word_freq(tokens, lang, global_vocab.get("func", []))
     cng = extract_char_ngrams(segment.text, 4, 100, lang, global_vocab.get("char_ngram", []))
     wbg = extract_word_bigrams(tokens, lang, global_vocab.get("word_bigram", []))
-    sm, ss = extract_sentence_stats(segment.text, lang)
+    sm, ss = (
+        sent_stats
+        if sent_stats is not None
+        else extract_sentence_stats(segment.text, lang)
+    )
     pct = extract_punct_dist(segment.text, lang, global_vocab.get("punct", []))
     ttr, hapax = extract_ttr_hapax(tokens, lang)
 
@@ -786,29 +848,46 @@ def weighted_cosine_similarity(fv_a: FeatureVector, fv_b: FeatureVector) -> floa
     # 但 0 意味着"完全不相似"，会不公平地拉低总分。
     # 无数据时应给中性分 0.5，既不支持也不反对。
     # 注意：两个非空向量正交（cos=0）是真实的"不相似"信号，不应给中性分。
-    def _cos_or_neutral(a_vec: List[float], b_vec: List[float]) -> float:
+    # 范数从 FeatureVector._norms 缓存取用（公式与 cosine_similarity
+    # 内部完全一致：sqrt(sum(x*x))，再 dot / (norm_a * norm_b)），
+    # 两两比较场景下每个向量的范数只计算一次，结果与逐对计算完全相同。
+    def _cached_norm(fv: FeatureVector, key: str, vec: List[float]) -> float:
+        cached = fv._norms.get(key)
+        if cached is None:
+            cached = math.sqrt(sum(x * x for x in vec))
+            fv._norms[key] = cached
+        return cached
+
+    def _cos_or_neutral(
+        key: str, a_vec: List[float], b_vec: List[float]
+    ) -> float:
         if not a_vec or not b_vec:
             return 0.5
-        return cosine_similarity(a_vec, b_vec)
+        norm_a = _cached_norm(fv_a, key, a_vec)
+        norm_b = _cached_norm(fv_b, key, b_vec)
+        if norm_a == 0 or norm_b == 0:
+            return 0.0
+        dot = sum(x * y for x, y in zip(a_vec, b_vec))
+        return dot / (norm_a * norm_b)
 
     # 1. 词长分布
     scores["word_length_dist"] = _cos_or_neutral(
-        fv_a.word_length_dist, fv_b.word_length_dist
+        "word_length_dist", fv_a.word_length_dist, fv_b.word_length_dist
     )
 
     # 2. 虚词频率 — 最重要的维度
     scores["function_word_freq"] = _cos_or_neutral(
-        fv_a.function_word_freq, fv_b.function_word_freq
+        "function_word_freq", fv_a.function_word_freq, fv_b.function_word_freq
     )
 
     # 3. 字 4-gram — 低权重，仅作辅助
     scores["char_ngrams"] = _cos_or_neutral(
-        fv_a.char_ngrams, fv_b.char_ngrams
+        "char_ngrams", fv_a.char_ngrams, fv_b.char_ngrams
     )
 
     # 4. 词 bigram
     scores["word_bigrams"] = _cos_or_neutral(
-        fv_a.word_bigrams, fv_b.word_bigrams
+        "word_bigrams", fv_a.word_bigrams, fv_b.word_bigrams
     )
 
     # 5. 句长统计 — 两个标量分别比较再取均值
@@ -818,7 +897,7 @@ def weighted_cosine_similarity(fv_a: FeatureVector, fv_b: FeatureVector) -> floa
 
     # 6. 标点分布
     scores["punct_dist"] = _cos_or_neutral(
-        fv_a.punct_dist, fv_b.punct_dist
+        "punct_dist", fv_a.punct_dist, fv_b.punct_dist
     )
 
     # 7. TTR（词汇丰富度）

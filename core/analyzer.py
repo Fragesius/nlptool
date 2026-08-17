@@ -431,24 +431,30 @@ def tokenize_zh(text: str) -> List[Token]:
     return tokens
 
 
+def _tokens_from_doc(doc) -> List[Token]:
+    """将 spaCy Doc 转为 Token 列表（tokenize_en 与批量分词共用）。"""
+    tokens: List[Token] = []
+    for t in doc:
+        if t.is_space:
+            continue
+        tokens.append(
+            Token(
+                text=t.text,
+                pos=t.pos_,
+                lemma=t.lemma_.lower(),
+                is_stop=t.is_stop or t.text.lower() in _EN_STOP,
+                lang="en",
+            )
+        )
+    return tokens
+
+
 def tokenize_en(text: str) -> List[Token]:
     """英文分词（spaCy 优先，回退到正则）。"""
     nlp = _get_spacy("en")
     tokens: List[Token] = []
     if nlp:
-        doc = nlp(text)
-        for t in doc:
-            if t.is_space:
-                continue
-            tokens.append(
-                Token(
-                    text=t.text,
-                    pos=t.pos_,
-                    lemma=t.lemma_.lower(),
-                    is_stop=t.is_stop or t.text.lower() in _EN_STOP,
-                    lang="en",
-                )
-            )
+        return _tokens_from_doc(nlp(text))
     else:
         # 回退：正则分词
         for raw in re.findall(r"[A-Za-z]+(?:[-'][A-Za-z]+)*", text):
@@ -457,6 +463,24 @@ def tokenize_en(text: str) -> List[Token]:
                 Token(text=raw, pos="WORD", lemma=low, is_stop=low in _EN_STOP, lang="en")
             )
     return tokens
+
+
+def tokenize_many(texts: List[str], lang: str) -> List[List[Token]]:
+    """批量分词，结果与逐条调用 ``tokenize(t, lang)`` 完全一致。
+
+    英文且 spaCy 可用时走 ``nlp.pipe`` 批处理（管线内部按批次并行，
+    每篇文档的分词结果与单独调用 ``nlp(text)`` 相同），大幅减少
+    逐次调用的开销；其余情况回退为逐条 ``tokenize``。
+
+    :param texts: 待分词文本列表
+    :param lang: 语言代码（"en" / "zh" / "mixed" 等，同 ``tokenize``）
+    :return: 与 ``texts`` 一一对应的 Token 列表的列表
+    """
+    if lang == "en":
+        nlp = _get_spacy("en")
+        if nlp:
+            return [_tokens_from_doc(doc) for doc in nlp.pipe(texts)]
+    return [tokenize(t, lang) for t in texts]
 
 
 def tokenize(text: str, lang: Optional[str] = None) -> List[Token]:
