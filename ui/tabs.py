@@ -11,6 +11,7 @@ from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolb
 from matplotlib.figure import Figure
 
 import os
+import queue
 
 from core import analyzer, comparison, api_backend, history, linguistic_fingerprint, batch, file_io
 from ui.async_runner import TaskRunner
@@ -1737,6 +1738,20 @@ class ExperimentTab(ttk.Frame):
             state="disabled")
         self.open_btn.pack(side="left", padx=(8, 0))
 
+        # ── 确定性进度条 + 阶段文字 ──
+        prog = ttk.Frame(self)
+        prog.pack(fill="x", padx=10, pady=2)
+        self.stage_var = tk.StringVar(value="")
+        ttk.Label(
+            prog, textvariable=self.stage_var,
+            font=(FONT, responsive_font_size(FONT_SCALE["caption"])),
+            foreground=s.MUTED,
+        ).pack(side="left")
+        self.progress_bar = ttk.Progressbar(
+            prog, mode="determinate", length=280)
+        self.progress_bar.pack(side="right")
+        self._progress_queue: "queue.Queue[tuple]" = queue.Queue()
+
         # ── 结果摘要 ──
         card = ttk.LabelFrame(self, text="📋 实验结果摘要", style="Card.TLabelframe")
         card.pack(fill="both", expand=True, padx=10, pady=(4, 10))
@@ -1806,19 +1821,43 @@ class ExperimentTab(ttk.Frame):
         clean = self.clean_var.get()
         self.run_btn.configure(state="disabled")
         self.open_btn.configure(state="disabled")
+        self.stage_var.set("准备中…")
+        self.progress_bar.configure(maximum=1, value=0)
         self.app.set_status("正在运行批量实验……")
         self._runner.run(
             self._do_experiment,
             args=(input_dir, out_dir, chunk_size, mode, clean),
+            kwargs={"progress_callback": self._enqueue_progress},
             on_success=self._on_result,
             on_error=self._on_error,
             title="批量实验",
             message="正在执行切片与分组实验（Delta 聚类 + 指纹检验），请稍候...",
+            show_dialog=False,
         )
+        self._drain_progress()
+
+    # ── 进度回调（后台线程）与主线程刷新 ──
+    def _enqueue_progress(self, current: int, total: int, stage: str) -> None:
+        """后台线程的进度回调：只入队，不碰 UI。"""
+        self._progress_queue.put((current, total, stage))
+
+    def _drain_progress(self) -> None:
+        """主线程轮询进度队列，刷新进度条与阶段文字。"""
+        try:
+            while True:
+                current, total, stage = self._progress_queue.get_nowait()
+                self.stage_var.set(f"{stage} {current:,}/{total:,}")
+                self.progress_bar.configure(maximum=max(total, 1))
+                self.progress_bar["value"] = current
+        except queue.Empty:
+            pass
+        if self._runner.is_running():
+            self.after(100, self._drain_progress)
 
     @staticmethod
     def _do_experiment(input_dir: str, out_dir: str, chunk_size: int,
-                       mode: str, clean: bool) -> tuple:
+                       mode: str, clean: bool,
+                       progress_callback=None) -> tuple:
         """后台线程执行：可选切片 + 分组实验，返回 (stats, out_dir)。
 
         只调用 experiments 包的核心函数，不复制实验逻辑。
@@ -1841,7 +1880,8 @@ class ExperimentTab(ttk.Frame):
             if mode == "slice":
                 sliced_dir = Path(out_dir) / "sliced_corpus"
                 written = slice_corpus(Path(input_dir), sliced_dir,
-                                       chunk_size, clean=clean)
+                                       chunk_size, clean=clean,
+                                       progress_callback=progress_callback)
                 if not written:
                     raise ValueError(
                         "切片结果为空：所有文本都短于 0.5 × 切片词数，"
@@ -1849,7 +1889,8 @@ class ExperimentTab(ttk.Frame):
                     )
                 exp_input = sliced_dir
 
-            stats = run_experiment(exp_input, Path(out_dir))
+            stats = run_experiment(exp_input, Path(out_dir),
+                                   progress_callback=progress_callback)
         finally:
             if prev_backend.lower() != "agg":
                 plt.switch_backend(prev_backend)
@@ -1875,6 +1916,14 @@ class ExperimentTab(ttk.Frame):
             f"  差值（组间 − 组内）：{stats['delta_diff']:.4f}",
             f"  比值（组间 / 组内）：{ratio_str}",
             "",
+            "【1-NN 留一法分类】",
+            f"  准确率：{stats['nn_accuracy']:.4f}（随机基线 {stats['nn_baseline']:.4f}）",
+            "",
+            "【信号竞争检验】",
+            f"  原文信号胜 {stats['sc_wins_original']} 次，"
+            f"译者信号胜 {stats['sc_wins_translator']} 次，"
+            f"符号检验 p = {stats['sc_p_value']:.4f}",
+            "",
             "【语言指纹相似度】",
             f"  同译者对平均：{stats['same_sim_mean']:.4f}",
             f"  跨译者对平均：{stats['cross_sim_mean']:.4f}",
@@ -1890,6 +1939,8 @@ class ExperimentTab(ttk.Frame):
         self.result_text.delete("1.0", "end")
         self.result_text.insert("end", "\n".join(lines))
 
+        self.stage_var.set("完成")
+        self.progress_bar.configure(maximum=1, value=1)
         self.open_btn.configure(state="normal")
         self.run_btn.configure(state="normal")
         self.app.set_status(
@@ -1901,6 +1952,8 @@ class ExperimentTab(ttk.Frame):
             f"{e}\n\n请检查：语料目录下是否至少有 2 个组子文件夹，"
             f"且每组至少 2 个 .txt 样本。",
         )
+        self.stage_var.set("失败")
+        self.progress_bar.configure(value=0)
         self.run_btn.configure(state="normal")
         self.app.set_status("批量实验失败")
 

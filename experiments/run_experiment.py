@@ -138,6 +138,7 @@ def run(
     top_n: int = 100,
     perm_n: int = 10000,
     lang: str = "en",
+    progress_callback=None,
 ) -> Dict[str, object]:
     """Run the full grouped experiment and write all artifacts.
 
@@ -146,8 +147,15 @@ def run(
     :param top_n: number of most-frequent-word features for Delta
     :param perm_n: permutation test iterations
     :param lang: language code for fingerprint features ("en" or "zh")
+    :param progress_callback: optional ``callback(current, total,
+        stage_name)`` invoked at each pipeline step; omitting it keeps
+        the command-line behavior unchanged
     :return: dict of key statistics (for testing / programmatic use)
     """
+    def _progress(current: int, total: int, stage: str) -> None:
+        if progress_callback is not None:
+            progress_callback(current, total, stage)
+
     input_dir = Path(input_dir)
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -170,9 +178,11 @@ def run(
     # ------------------------------------------------------------------
     # (a) Burrows' Delta matrix + dendrogram
     # ------------------------------------------------------------------
+    _progress(0, 1, "Delta 特征")
     freq_table = build_freq_table(texts, n=top_n)
     zs = zscore(freq_table)
-    dm = delta_matrix(zs)
+    _progress(1, 1, "Delta 特征")
+    dm = delta_matrix(zs, progress_callback=progress_callback)
     matrix: List[List[float]] = dm["matrix"]  # type: ignore[assignment]
     dm_labels: List[str] = dm["labels"]  # type: ignore[assignment]
 
@@ -184,11 +194,13 @@ def run(
             writer.writerow([label] + [f"{d:.6f}" for d in row])
     print(f"Delta matrix written: {csv_path}")
 
+    _progress(0, 1, "聚类与树状图")
     tree = hierarchical_cluster(matrix, dm_labels)
     png_path = plot_dendrogram(
         tree, out_dir / "dendrogram.png",
         title="Burrows' Delta Clustering: " + " vs ".join(group_names),
     )
+    _progress(1, 1, "聚类与树状图")
     print(f"Dendrogram saved: {png_path}")
 
     # ------------------------------------------------------------------
@@ -216,7 +228,8 @@ def run(
     # ------------------------------------------------------------------
     # (b2) 1-NN leave-one-out classification on the Delta matrix
     # ------------------------------------------------------------------
-    nn = nearest_neighbor_loo(dm_labels, matrix, group_of)
+    nn = nearest_neighbor_loo(dm_labels, matrix, group_of,
+                              progress_callback=progress_callback)
     nn_accuracy: float = nn["accuracy"]  # type: ignore[assignment]
     nn_baseline: float = nn["baseline"]  # type: ignore[assignment]
     nn_per_group: Dict[str, Tuple[int, int]] = nn["per_group"]  # type: ignore[assignment]
@@ -235,7 +248,8 @@ def run(
     # ------------------------------------------------------------------
     # (b3) Signal competition test (original vs translator signal)
     # ------------------------------------------------------------------
-    sc = signal_competition(dm_labels, matrix, group_of)
+    sc = signal_competition(dm_labels, matrix, group_of,
+                            progress_callback=progress_callback)
     sc_wins_o: int = sc["wins_original"]  # type: ignore[assignment]
     sc_wins_t: int = sc["wins_translator"]  # type: ignore[assignment]
     sc_ties: int = sc["ties"]  # type: ignore[assignment]
@@ -265,23 +279,27 @@ def run(
     # - extract_sentence_stats_many：全部句子一次性批量分词；
     # - 预分词结果同时供 build_global_vocab 与 extract_features 复用，
     #   避免旧路径中"建词汇表一遍、提特征又一遍"的重复分词。
+    _progress(0, n_samples, "指纹特征提取")
     text_list = [texts[label] for label in labels]
     token_list = tokenize_many(text_list, lang)
     sent_stats_list = extract_sentence_stats_many(text_list, lang)
 
     vocab = build_global_vocab(text_list, lang, tokenized=token_list)
     fvs = {}
-    for label, text, toks, sst in zip(labels, text_list, token_list,
-                                      sent_stats_list):
+    for feat_idx, (label, text, toks, sst) in enumerate(
+            zip(labels, text_list, token_list, sent_stats_list), start=1):
         seg = SegmentInfo(
             text=text, segment_index=0, char_count=len(text), lang=lang
         )
         fvs[label] = extract_features(seg, vocab, tokens=toks, sent_stats=sst)
+        _progress(feat_idx, n_samples, "指纹特征提取")
 
     # Similarity of every unordered pair, grouped by same/cross translator.
     sim_pair: Dict[Tuple[str, str], float] = {}
     same_sims: List[float] = []
     cross_sims: List[float] = []
+    total_sim_pairs = n_samples * (n_samples - 1) // 2
+    done_sim_pairs = 0
     for i, la in enumerate(labels):
         for j in range(i + 1, len(labels)):
             lb = labels[j]
@@ -291,6 +309,8 @@ def run(
                 same_sims.append(sim)
             else:
                 cross_sims.append(sim)
+            done_sim_pairs += 1
+            _progress(done_sim_pairs, total_sim_pairs, "指纹配对")
 
     pairs_path = out_dir / "fingerprint_pairs.csv"
     with pairs_path.open("w", newline="", encoding="utf-8-sig") as f:
@@ -320,6 +340,7 @@ def run(
             sum(same_to) / len(same_to) - sum(cross_to) / len(cross_to)
         )
     p_wilcoxon = wilcoxon_signed_rank_test(differences)
+    _progress(0, 1, "统计检验")
     p_perm = permutation_test(same_sims, cross_sims, n_iter=perm_n)
     d_val = cohens_d(
         same_mean, cross_mean_sim, same_std, cross_std_sim,
@@ -478,6 +499,7 @@ def run(
     ]
     report_path = out_dir / "report.md"
     report_path.write_text("\n".join(report_lines), encoding="utf-8")
+    _progress(1, 1, "统计检验")
     print(f"Report written: {report_path}")
 
     return {

@@ -106,6 +106,7 @@ def chunk_text(text: str, chunk_size: int = 2000) -> List[str]:
 def slice_corpus(
     input_dir: Path, out_dir: Path, chunk_size: int = 2000,
     clean: bool = False,
+    progress_callback=None,
 ) -> List[Path]:
     """Slice every ``.txt`` under ``input_dir`` into word-count chunks.
 
@@ -118,6 +119,8 @@ def slice_corpus(
     :param chunk_size: target number of words per chunk
     :param clean: True 时切片开始前先清空 ``out_dir`` 下的旧内容
                   （带危险路径护栏，见 ``clean_output_dir``）
+    :param progress_callback: 可选进度回调
+        ``callback(current, total, stage_name)``，每处理完一个源文件调用一次
     :return: list of written chunk file paths
     """
     input_dir = Path(input_dir)
@@ -128,8 +131,10 @@ def slice_corpus(
             print(f"cleaned {removed} item(s) under {out_dir} before slicing")
     out_dir.mkdir(parents=True, exist_ok=True)
 
+    sources = sorted(input_dir.rglob("*.txt"))
+    total = len(sources)
     written: List[Path] = []
-    for src in sorted(input_dir.rglob("*.txt")):
+    for file_idx, src in enumerate(sources, start=1):
         rel = src.relative_to(input_dir)
         text = src.read_text(encoding="utf-8")
         chunks = chunk_text(text, chunk_size)
@@ -144,6 +149,8 @@ def slice_corpus(
             out_path.write_text(chunk, encoding="utf-8")
             written.append(out_path)
         print(f"  {rel}: {len(chunks)} chunk(s)")
+        if progress_callback is not None:
+            progress_callback(file_idx, total, "切片")
     return written
 
 

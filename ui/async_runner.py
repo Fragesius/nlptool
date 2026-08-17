@@ -62,6 +62,7 @@ class TaskRunner:
         title: str = "处理中",
         message: str = "请稍候...",
         cancellable: bool = True,
+        show_dialog: bool = True,
     ) -> None:
         """启动后台任务并显示进度对话框。
 
@@ -73,6 +74,8 @@ class TaskRunner:
             title: 进度对话框标题。
             message: 进度对话框提示文本。
             cancellable: 是否显示取消按钮。
+            show_dialog: False 时不弹模态进度对话框（调用方自行展示
+                进度，例如内嵌确定性进度条）。
         """
         if self._running:
             # 当前已在运行：忽略重复调用（调用方应自行防重入）
@@ -84,7 +87,8 @@ class TaskRunner:
         self._cancelled.clear()
         kwargs = kwargs or {}
 
-        self._show_dialog(title, message, cancellable)
+        if show_dialog:
+            self._show_dialog(title, message, cancellable)
         self._start_polling()
 
         def _target():

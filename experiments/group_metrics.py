@@ -58,7 +58,8 @@ def work_stem(sample_label: str) -> str:
 
 
 def nearest_neighbor_loo(
-    labels: List[str], matrix: List[List[float]], group_of: Dict[str, str]
+    labels: List[str], matrix: List[List[float]], group_of: Dict[str, str],
+    progress_callback=None,
 ) -> Dict[str, object]:
     """基于 Delta 距离矩阵的留一法最近邻分类。
 
@@ -68,6 +69,8 @@ def nearest_neighbor_loo(
     :param labels: 样本标签列表（与 ``matrix`` 行列对应）
     :param matrix: 两两 Delta 距离矩阵
     :param group_of: ``{样本标签: 组名}``
+    :param progress_callback: 可选进度回调
+        ``callback(current, total, stage_name)``，每判定一个切片调用一次
     :return: ``{"predictions": [{sample, true_group, nn_sample, nn_group, hit}],
                 "accuracy": 总体准确率,
                 "baseline": 随机基线（最大组样本占比）,
@@ -104,6 +107,8 @@ def nearest_neighbor_loo(
         if hit:
             n_correct += 1
             per_group_hits[group_of[la]] = per_group_hits.get(group_of[la], 0) + 1
+        if progress_callback is not None:
+            progress_callback(i + 1, n, "1-NN 最近邻")
 
     group_sizes: Dict[str, int] = {}
     for la in labels:
@@ -161,7 +166,8 @@ def _mean_delta(
 
 
 def signal_competition(
-    labels: List[str], matrix: List[List[float]], group_of: Dict[str, str]
+    labels: List[str], matrix: List[List[float]], group_of: Dict[str, str],
+    progress_callback=None,
 ) -> Dict[str, object]:
     """信号竞争检验：原文信号 vs 译者信号。
 
@@ -172,6 +178,8 @@ def signal_competition(
     :param labels: 样本标签列表（与 ``matrix`` 行列对应）
     :param matrix: 两两 Delta 距离矩阵
     :param group_of: ``{样本标签: 组名}``
+    :param progress_callback: 可选进度回调
+        ``callback(current, total, stage_name)``，每处理一对篇目调用一次
     :return: ``{"pairs": [每对篇目明细 dict],
                 "wins_original": 原文信号获胜次数,
                 "wins_translator": 译者信号获胜次数,
@@ -198,11 +206,20 @@ def signal_competition(
     wins_translator = 0
     ties = 0
 
+    total_pairs = sum(
+        sum(1 for s, gm in works.items() if ga in gm and gb in gm)
+        for ga, gb in combinations(groups, 2)
+    )
+    done_pairs = 0
+
     for ga, gb in combinations(groups, 2):
         common = sorted(
             s for s, gm in works.items() if ga in gm and gb in gm
         )
         for stem in common:
+            done_pairs += 1
+            if progress_callback is not None:
+                progress_callback(done_pairs, total_pairs, "信号竞争")
             a_chunks = works[stem][ga]
             b_chunks = works[stem][gb]
 

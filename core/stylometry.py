@@ -129,13 +129,18 @@ def zscore(freq_table: Dict[str, object]) -> Dict[str, object]:
     return {"features": kept_features, "zscores": zscores, "dropped": dropped}
 
 
-def delta_matrix(zscores_data: Dict[str, object]) -> Dict[str, object]:
+def delta_matrix(
+    zscores_data: Dict[str, object],
+    progress_callback=None,
+) -> Dict[str, object]:
     """计算两两 Burrows' Delta 距离矩阵。
 
     两篇文本的 Delta 距离定义为：所有特征词 z 分数绝对差的均值。
     矩阵对称，对角线为 0。
 
     :param zscores_data: ``zscore`` 的返回结果
+    :param progress_callback: 可选进度回调
+        ``callback(current, total, stage_name)``，每完成一对调用一次
     :return: ``{"labels": [文本名, ...], "matrix": [[距离, ...], ...]}``
     """
     zscores: Dict[str, List[float]] = zscores_data["zscores"]  # type: ignore[assignment]
@@ -143,6 +148,8 @@ def delta_matrix(zscores_data: Dict[str, object]) -> Dict[str, object]:
     size = len(labels)
     matrix = [[0.0] * size for _ in range(size)]
 
+    total_pairs = size * (size - 1) // 2
+    done = 0
     for i in range(size):
         zi = zscores[labels[i]]
         for j in range(i + 1, size):
@@ -151,6 +158,9 @@ def delta_matrix(zscores_data: Dict[str, object]) -> Dict[str, object]:
             d = sum(abs(a - b) for a, b in zip(zi, zj)) / n_feat
             matrix[i][j] = d
             matrix[j][i] = d
+            done += 1
+            if progress_callback is not None:
+                progress_callback(done, total_pairs, "Delta 矩阵")
 
     return {"labels": labels, "matrix": matrix}
 
