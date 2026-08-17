@@ -10,6 +10,9 @@ click>=8.0.0  # spaCy 下载命令依赖
 matplotlib>=3.5.0
 wordcloud>=1.9.0
 
+# 现代化 GUI 框架（基于 tkinter，深浅色主题跟随系统）
+customtkinter>=5.2
+
 # 中文情感分析（可选，缺失时自动回退到内置词典）
 snownlp>=0.12.3
 

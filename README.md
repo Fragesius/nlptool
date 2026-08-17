@@ -121,6 +121,34 @@ MIT © 2026 Fragesius
 
 ## 📦 Changelog
 
+### v2.0.0 — 性能重构、新研究指标、进度系统与 GUI 现代化
+
+⚡ **实验管线性能重构（统计结果零变化）**
+- 语言指纹管线每样本只分词一次：新增 `core/analyzer.py` 的 `tokenize_many()`（英文走 spaCy `nlp.pipe` 批处理，结果与逐条分词完全一致），预分词结果同时供 `build_global_vocab()` 与 `extract_features()` 复用；新增 `extract_sentence_stats_many()` 把全部文本的句子收集后一次性批量分词，消除「每句一次 spaCy 调用」的开销
+- `weighted_cosine_similarity()` 增加向量范数缓存（`FeatureVector._norms`），两两比较场景下每个向量的范数只计算一次，公式与运算顺序不变
+- 220 样本实测 115s → 80s；优化前后 `delta_matrix.csv` / `dendrogram.png` / `fingerprint_pairs.csv` / `report.md` 逐字节一致
+- 新增 `tests/test_performance.py`：30 样本断言 `extract_features` 调用次数 == 样本数（O(n) 提取），批量/逐条路径结果一致性
+
+📏 **两个新研究指标（`experiments/group_metrics.py`，只加不改）**
+- 1-NN 留一法分类准确率：基于 Delta 距离矩阵逐切片找最近邻判组，输出总体准确率、随机基线（最大组占比）与分组准确率，明细 `nn_predictions.csv`（每切片一行）
+- 信号竞争检验：同词根篇目（去 `__chunkNNN` 后缀）跨组配对为同一原作的两个译本，比较同篇跨译者距离与同译者跨篇距离，纯 Python 二项符号检验（H0: p=0.5），明细 `signal_competition.csv`，孤儿篇目跳过并列于报告；两项指标均含中文模板结论并写入 `report.md`
+- 既有 Delta 比值、Wilcoxon、置换检验、Cohen's d 的计算逻辑与数字一律不变
+
+📊 **确定性进度系统**
+- `run()` / `slice_corpus()` / `delta_matrix()` / 1-NN / 信号竞争均接受可选 `progress_callback(current, total, stage_name)`；命令行不传回调时行为完全不变
+- 各阶段工作量明确：切片 N 文件、指纹特征提取 N 样本、Delta 矩阵 N²/2 对、指纹配对 M 对、1-NN N 次、信号竞争 P 对
+- GUI 实验页内嵌确定性进度条与阶段文字（如「指纹配对 12,340/27,930」），后台线程回调经队列切主线程刷新
+
+🎨 **全 GUI 迁移 customtkinter**
+- 主窗口、全部 8 个标签页与全部对话框迁移到 customtkinter 控件体系，无原生 tk/ttk 控件混用（仅保留 CTk 无等价物的窗口菜单 `tk.Menu` 与 matplotlib 嵌入画布）
+- 学术工具感设计：深浅色跟随系统（保留手动切换按钮），全局统一墨绿强调色（`ui/theme_academic.json` + `ui/style.py` 双色常量），统一字体与 padding
+- 每个标签页按「输入设置 / 运行控制 / 结果展示」三段式卡片分区；实验页结果摘要为整齐网格，显著性结论带语义色（显著=绿、不显著=灰）；长文本结果区均为滚动文本框；窗口设最小尺寸
+- 迁移只动 `ui/` 层与 `main.py`，业务逻辑调用关系一行未改
+
+🧹 **切片输出目录清理（`--clean`）**
+- `slice_corpus.py` 新增 `--clean`：切片前清空输出目录（含根目录/主目录等危险路径护栏，清空前打印删除条目数）；不带 `--clean` 行为完全不变
+- GUI 实验页新增「运行前清空输出目录」勾选框，默认勾选
+
 ### v1.4.1 — 批量实验管线图形界面
 
 🖱 **「批量实验」标签页**

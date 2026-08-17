@@ -24,10 +24,12 @@ from __future__ import annotations
 import queue
 import threading
 import tkinter as tk
-from tkinter import ttk, messagebox
+from tkinter import messagebox
 from typing import Callable, Optional, Tuple, Any
 
-from ui.style import get_theme, FONT, FONT_SCALE, responsive_font_size
+import customtkinter as ctk
+
+from ui import style as s
 
 
 class TaskCancelled(Exception):
@@ -41,7 +43,7 @@ class TaskRunner:
 
     def __init__(self, parent: tk.Widget):
         self.parent = parent
-        self._dialog: Optional[tk.Toplevel] = None
+        self._dialog: Optional[ctk.CTkToplevel] = None
         self._cancelled = threading.Event()
         self._running = False
         self._queue: queue.Queue = queue.Queue()
@@ -117,46 +119,45 @@ class TaskRunner:
     # --------------------------------------------------------------------- #
 
     def _show_dialog(self, title: str, message: str, cancellable: bool) -> None:
-        t = get_theme()
-        self._dialog = tk.Toplevel(self.parent)
+        self._dialog = ctk.CTkToplevel(self.parent)
         self._dialog.title(title)
-        self._dialog.configure(bg=t.CARD)
-        self._dialog.transient(self.parent)
-        self._dialog.grab_set()
+        self._dialog.transient(self.parent.winfo_toplevel())
         self._dialog.resizable(False, False)
-        self._dialog.geometry("360x140")
+        self._dialog.geometry("380x150")
 
         # 居中于父窗口
         self._dialog.update_idletasks()
         parent = self.parent.winfo_toplevel()
         px, py = parent.winfo_x(), parent.winfo_y()
         pw, ph = parent.winfo_width(), parent.winfo_height()
-        dx, dy = 360, 140
+        dx, dy = 380, 150
         self._dialog.geometry(f"+{px + (pw - dx) // 2}+{py + (ph - dy) // 2}")
+        self._dialog.grab_set()
 
-        frame = tk.Frame(self._dialog, bg=t.CARD)
+        frame = ctk.CTkFrame(self._dialog, fg_color="transparent")
         frame.pack(fill="both", expand=True, padx=20, pady=20)
 
-        tk.Label(
+        ctk.CTkLabel(
             frame,
             text=message,
-            font=(FONT, responsive_font_size(FONT_SCALE["body"])),
-            bg=t.CARD, fg=t.TEXT,
-            wraplength=300,
+            font=s.font("body"),
+            wraplength=320,
+            justify="left",
         ).pack(anchor="w", pady=(0, 12))
 
-        self._progress = ttk.Progressbar(frame, mode="indeterminate", length=300)
+        self._progress = ctk.CTkProgressBar(frame, mode="indeterminate", width=320)
         self._progress.pack(fill="x", pady=(0, 12))
-        self._progress.start(15)
+        self._progress.start()
 
         if cancellable:
-            btn = tk.Button(
+            btn = ctk.CTkButton(
                 frame,
                 text="取消",
-                font=(FONT, responsive_font_size(FONT_SCALE["body"])),
-                bg=t.BUTTON_BG, fg=t.TEXT,
-                activebackground=t.BUTTON_HOVER,
-                relief="flat", padx=16, pady=4,
+                font=s.font("body"),
+                width=90,
+                fg_color=s.BUTTON_NEUTRAL,
+                hover_color=s.BUTTON_NEUTRAL_HOVER,
+                text_color=s.TEXT,
                 command=self._cancel,
             )
             btn.pack(anchor="e")
@@ -207,10 +208,7 @@ class TaskRunner:
             if on_error is not None:
                 on_error(error)
             else:
-                messagebox.showerror(
-                    f"{self._dialog.title() if self._dialog else '任务'} 失败",
-                    str(error),
-                )
+                messagebox.showerror("任务失败", str(error))
         else:
             if on_success is not None:
                 on_success(result)
