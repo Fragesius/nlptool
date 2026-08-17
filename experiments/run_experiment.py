@@ -15,6 +15,10 @@ Pipeline:
        writes ``delta_matrix.csv`` and ``dendrogram.png``
        (reuses viz.dendrogram).
     b) Within-group vs cross-group mean Delta: mean, difference, ratio.
+       Plus (v2.0.0): 1-NN leave-one-out classification accuracy on the
+       Delta matrix (``nn_predictions.csv``) and the signal competition
+       test pairing same-stem works across groups
+       (``signal_competition.csv``), both summarized in ``report.md``.
     c) Pairwise linguistic-fingerprint similarity (reuses
        core.linguistic_fingerprint): same-translator pairs vs
        cross-translator pairs, with Wilcoxon signed-rank test,
@@ -53,6 +57,10 @@ from core.linguistic_fingerprint import (  # noqa: E402
     cohens_d,
 )
 from viz.dendrogram import plot_dendrogram  # noqa: E402
+from experiments.group_metrics import (  # noqa: E402
+    nearest_neighbor_loo,
+    signal_competition,
+)
 
 
 def load_groups(input_dir: Path) -> Dict[str, Dict[str, str]]:
@@ -206,6 +214,50 @@ def run(
           f"diff={delta_diff:.4f}, ratio={delta_ratio:.2f}")
 
     # ------------------------------------------------------------------
+    # (b2) 1-NN leave-one-out classification on the Delta matrix
+    # ------------------------------------------------------------------
+    nn = nearest_neighbor_loo(dm_labels, matrix, group_of)
+    nn_accuracy: float = nn["accuracy"]  # type: ignore[assignment]
+    nn_baseline: float = nn["baseline"]  # type: ignore[assignment]
+    nn_per_group: Dict[str, Tuple[int, int]] = nn["per_group"]  # type: ignore[assignment]
+
+    nn_path = out_dir / "nn_predictions.csv"
+    with nn_path.open("w", newline="", encoding="utf-8-sig") as f:
+        writer = csv.writer(f)
+        writer.writerow(
+            ["sample", "true_group", "nn_sample", "nn_group", "hit"])
+        for p in nn["predictions"]:  # type: ignore[union-attr]
+            writer.writerow([p["sample"], p["true_group"], p["nn_sample"],
+                             p["nn_group"], "1" if p["hit"] else "0"])
+    print(f"1-NN LOO accuracy: {nn_accuracy:.4f} "
+          f"(baseline {nn_baseline:.4f}); written: {nn_path}")
+
+    # ------------------------------------------------------------------
+    # (b3) Signal competition test (original vs translator signal)
+    # ------------------------------------------------------------------
+    sc = signal_competition(dm_labels, matrix, group_of)
+    sc_wins_o: int = sc["wins_original"]  # type: ignore[assignment]
+    sc_wins_t: int = sc["wins_translator"]  # type: ignore[assignment]
+    sc_ties: int = sc["ties"]  # type: ignore[assignment]
+    sc_orphans: List[str] = sc["orphans"]  # type: ignore[assignment]
+    sc_p: float = sc["p_value"]  # type: ignore[assignment]
+
+    sc_path = out_dir / "signal_competition.csv"
+    with sc_path.open("w", newline="", encoding="utf-8-sig") as f:
+        writer = csv.writer(f)
+        writer.writerow(["work", "group_a", "group_b",
+                         "cross_translator_dist", "same_translator_dist",
+                         "winner"])
+        for row in sc["pairs"]:  # type: ignore[union-attr]
+            writer.writerow([row["work"], row["group_a"], row["group_b"],
+                             f"{row['cross_translator_dist']:.6f}",
+                             f"{row['same_translator_dist']:.6f}",
+                             row["winner"]])
+    print(f"Signal competition: original {sc_wins_o} vs "
+          f"translator {sc_wins_t} (ties {sc_ties}, sign-test "
+          f"p={sc_p:.4f}); written: {sc_path}")
+
+    # ------------------------------------------------------------------
     # (c) Pairwise linguistic fingerprint similarity
     # ------------------------------------------------------------------
     # 性能重构（v2.0.0）：每个样本只分词一次、只提取一次特征。
@@ -317,6 +369,46 @@ def run(
             "请勿将阴性 Delta 直接解读为「无译者风格」，"
             "结论应结合下方指纹相似度与统计检验综合判断。",
         ]
+
+    # ── 1-NN 留一法结论（中文模板）──
+    if nn_accuracy > nn_baseline:
+        nn_conclusion = (
+            f"1-NN 留一法分类准确率 {nn_accuracy:.1%}，高于随机基线 "
+            f"{nn_baseline:.1%}：基于 Delta 距离的最近邻能稳定找回同组样本，"
+            "组间风格信号可识别。"
+        )
+    else:
+        nn_conclusion = (
+            f"1-NN 留一法分类准确率 {nn_accuracy:.1%}，未超过随机基线 "
+            f"{nn_baseline:.1%}：Delta 距离不足以区分各组。"
+        )
+
+    # ── 信号竞争检验结论（中文模板）──
+    if sc_wins_o + sc_wins_t == 0:
+        sc_conclusion = "无可配对篇目，信号竞争检验未执行。"
+    else:
+        leader = "原文" if sc_wins_o >= sc_wins_t else "译者"
+        if sc_p < 0.05:
+            sc_conclusion = (
+                f"符号检验显著（p={sc_p:.4f}）：{leader}信号强于对方"
+                f"（原文信号胜 {sc_wins_o} 次，译者信号胜 {sc_wins_t} 次）。"
+            )
+        else:
+            sc_conclusion = (
+                f"符号检验不显著（p={sc_p:.4f}）：原文信号胜 {sc_wins_o} 次，"
+                f"译者信号胜 {sc_wins_t} 次，两种信号的差异未达统计显著。"
+            )
+
+    if sc_orphans:
+        shown = sc_orphans[:20]
+        orphan_note = (
+            f"- Orphan works (skipped, present in only one group): "
+            f"{len(sc_orphans)} — " + ", ".join(f"`{s}`" for s in shown)
+            + (" …" if len(sc_orphans) > 20 else "")
+        )
+    else:
+        orphan_note = "- Orphan works: none"
+
     report_lines = [
         "# Translator Style Experiment Report",
         "",
@@ -342,6 +434,30 @@ def run(
     ] + delta_warning + [
         "",
         "![Dendrogram](dendrogram.png)",
+        "",
+        "## 1-NN Leave-One-Out Classification",
+        "",
+        f"- Overall accuracy: **{nn_accuracy:.4f}** "
+        f"({nn['n_correct']}/{n_samples})",
+        f"- Random baseline (majority group): **{nn_baseline:.4f}**",
+        "- Per-group accuracy: " + ", ".join(
+            f"`{g}`: {h}/{t} ({h / t:.4f})"
+            for g, (h, t) in nn_per_group.items()
+        ),
+        "- Details: `nn_predictions.csv`",
+        "",
+        nn_conclusion,
+        "",
+        "## Signal Competition Test",
+        "",
+        f"- Paired works: {len(sc['pairs'])}",
+        orphan_note,
+        f"- Original-signal wins: **{sc_wins_o}**; "
+        f"translator-signal wins: **{sc_wins_t}**; ties: {sc_ties}",
+        f"- Sign test (binomial, H0: p=0.5): p = **{sc_p:.4f}**",
+        "- Details: `signal_competition.csv`",
+        "",
+        sc_conclusion,
         "",
         "## Linguistic Fingerprint Similarity",
         "",
@@ -371,6 +487,17 @@ def run(
         "cross_delta_mean": cross_mean,
         "delta_diff": delta_diff,
         "delta_ratio": delta_ratio,
+        # v2.0.0 新增指标
+        "nn_accuracy": nn_accuracy,
+        "nn_baseline": nn_baseline,
+        "nn_per_group": {g: h / t for g, (h, t) in nn_per_group.items()},
+        "sc_wins_original": sc_wins_o,
+        "sc_wins_translator": sc_wins_t,
+        "sc_ties": sc_ties,
+        "sc_orphans": sc_orphans,
+        "sc_p_value": sc_p,
+        "nn_conclusion": nn_conclusion,
+        "sc_conclusion": sc_conclusion,
         "same_sim_mean": same_mean,
         "cross_sim_mean": cross_mean_sim,
         "p_wilcoxon": p_wilcoxon,
