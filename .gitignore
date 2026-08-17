@@ -10,3 +10,4 @@ dist/
 
 # 实验输出（由 experiments/run_delta.py 生成）
 experiments/output/
+results_test/

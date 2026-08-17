@@ -93,7 +93,7 @@ def test_cluster_groups_sample_corpus():
     """冒烟测试：4 篇合成语料按设计分组聚类（the 组 vs of 组）。"""
     texts = {
         p.stem: p.read_text(encoding="utf-8")
-        for p in sorted(SAMPLE_DIR.glob("*.txt"))
+        for p in sorted(SAMPLE_DIR.rglob("*.txt"))
     }
     assert len(texts) == 4
     # 组内两篇非 identical：内容与词频都有可控偏移

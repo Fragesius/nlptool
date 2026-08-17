@@ -121,6 +121,21 @@ MIT © 2026 Fragesius
 
 ## 📦 Changelog
 
+### v1.4.0-dev — 真实语料批量实验管线（译者风格识别）
+
+🧪 **批量分组实验管线**
+- 新增 `experiments/slice_corpus.py`：按英文单词数把长文本切成定长切片（默认 2000 词，`--chunk-size` 可配），不足 0.5×chunk-size 的尾片丢弃、≥0.5 的保留；分词与 `core/stylometry.py` 保持一致（正则 `[A-Za-z]+`），但在原文本上下刀以保留标点与空白；输出命名 `{原文件名}__chunkNNN.txt` 并镜像原目录结构
+- 新增 `experiments/run_experiment.py`：输入目录的每个一级子目录即一个组（组名自动识别，不硬编码），对全部切片跑 Burrows' Delta（复用 `core/stylometry.py`）输出 `delta_matrix.csv` 与 `dendrogram.png`（复用 `viz/dendrogram.py`），并计算组内/组间平均 Delta 的差值与比值
+- 语言指纹两两相似度（复用 `core/linguistic_fingerprint.py`，不改其签名）：同译者对与跨译者对分组后跑 Wilcoxon 符号秩检验（按切片构造配对差值）+ 置换检验（默认 10000 次）+ Cohen's d，明细写入 `fingerprint_pairs.csv`
+- 汇总输出 `report.md`：样本数、组内/组间 Delta 统计、检验 p 值与效应量、树状图引用，以及模板化自动生成的中文结论段
+- 新增 `tests/test_experiment.py`：覆盖切片词数、尾片取舍规则、目录结构镜像、全流程跑通（先切片再实验，贴近真实用法）及"同组 Delta < 跨组 Delta"断言，兼容 `python run_tests.py`；无 matplotlib 环境下全流程用例自动跳过
+
+🐞 **稳定性修复**
+- `experiments/sample_corpus` 重新生成（`_generate.py` v2）：v1 让填充词频率跨文本严格一致（z-score 零方差剔除），整篇跑信号极强，但切片破坏该一致性后噪声被 z-score 放大、组间分离消失；v2 改为按 1000 词块独立生成，虚词从带组偏差的加权分布抽样（每组 8 个偏好虚词 4 倍加权），组偏差稳定作用于每块、噪声块间独立，整篇 / 1000 词 / 2000 词切片三种尺度下组内 Delta 均稳定小于跨组（比值 ≈1.2–1.26）且聚类正确
+- `run_experiment.py` 报告新增 sanity check：cross/within Delta 比值 ≤1.1（含倒挂）时在 `report.md` 输出醒目警告，提示勿将阴性 Delta 误读为"无译者风格"
+- `run_experiment.py` 统计细节修正：Cohen's d 输入改用样本标准差（n−1，与其合并方差公式约定一致）；显著性判定由「任一检验 p<0.05」改为「两项检验均 p<0.05」（取 max，与 `core/linguistic_fingerprint.py` 的保守风格一致），避免多重比较假阳性
+- `run_experiment.py` 新增 `--lang`（en/zh，默认 en）指定指纹特征语言；输入根目录下散落的 .txt 会被警告并忽略（样本必须位于组子目录中）；`slice_corpus.py` 校验 `--chunk-size` 为正整数
+
 ### v1.3.0-dev — Burrows' Delta 文体计量（译者风格识别）
 
 📏 **Burrows' Delta 文体计量**
