@@ -61,6 +61,59 @@ def test_chunk_preserves_punctuation():
     assert chunks and "," in chunks[0] and "!" in chunks[0]
 
 
+def test_slice_corpus_clean_removes_stale_files():
+    """--clean：切片前清空输出目录，旧文件消失、新切片存在。"""
+    with tempfile.TemporaryDirectory() as td:
+        root = Path(td)
+        inp = root / "in"
+        inp.mkdir()
+        (inp / "alpha.txt").write_text(_make_words(2500), encoding="utf-8")
+        out = root / "out"
+        # 预置旧切片与杂散文件
+        stale_dir = out / "sub"
+        stale_dir.mkdir(parents=True)
+        (out / "old__chunk001.txt").write_text("stale", encoding="utf-8")
+        (stale_dir / "junk.txt").write_text("junk", encoding="utf-8")
+
+        written = slice_corpus(inp, out, chunk_size=2000, clean=True)
+
+        assert not (out / "old__chunk001.txt").exists(), "旧文件未被清除"
+        assert not stale_dir.exists(), "旧子目录未被清除"
+        assert (out / "alpha__chunk001.txt").is_file(), "新切片缺失"
+        assert len(written) == 1
+
+
+def test_slice_corpus_without_clean_keeps_stale_files():
+    """不带 --clean：行为不变，旧文件保留（新旧混杂）。"""
+    with tempfile.TemporaryDirectory() as td:
+        root = Path(td)
+        inp = root / "in"
+        inp.mkdir()
+        (inp / "alpha.txt").write_text(_make_words(2500), encoding="utf-8")
+        out = root / "out"
+        out.mkdir()
+        (out / "old__chunk001.txt").write_text("stale", encoding="utf-8")
+
+        slice_corpus(inp, out, chunk_size=2000)
+
+        assert (out / "old__chunk001.txt").is_file(), "不带 --clean 时旧文件应保留"
+        assert (out / "alpha__chunk001.txt").is_file()
+
+
+def test_slice_corpus_clean_refuses_dangerous_paths():
+    """--clean 防误删护栏：根目录、主目录等危险路径被拒绝。"""
+    from experiments.slice_corpus import clean_output_dir
+
+    root_anchor = Path(Path.cwd().anchor)  # 如 C:\
+    for dangerous in (root_anchor, Path.home()):
+        try:
+            clean_output_dir(dangerous)
+        except ValueError:
+            pass
+        else:
+            raise AssertionError(f"危险路径未被拒绝: {dangerous}")
+
+
 def test_slice_corpus_output_structure():
     """slice_corpus mirrors the directory tree and names files __chunkNNN."""
     with tempfile.TemporaryDirectory() as td:

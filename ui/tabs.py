@@ -1720,6 +1720,12 @@ class ExperimentTab(ttk.Frame):
             variable=self.mode_var, value="direct",
         ).pack(side="left")
 
+        self.clean_var = tk.BooleanVar(value=True)
+        ttk.Checkbutton(
+            opts, text="运行前清空输出目录",
+            variable=self.clean_var,
+        ).pack(side="left", padx=(12, 0))
+
         # ── 开始按钮 ──
         ctrl = ttk.Frame(self)
         ctrl.pack(fill="x", padx=10, pady=(6, 2))
@@ -1797,12 +1803,13 @@ class ExperimentTab(ttk.Frame):
             return
 
         mode = self.mode_var.get()
+        clean = self.clean_var.get()
         self.run_btn.configure(state="disabled")
         self.open_btn.configure(state="disabled")
         self.app.set_status("正在运行批量实验……")
         self._runner.run(
             self._do_experiment,
-            args=(input_dir, out_dir, chunk_size, mode),
+            args=(input_dir, out_dir, chunk_size, mode, clean),
             on_success=self._on_result,
             on_error=self._on_error,
             title="批量实验",
@@ -1811,7 +1818,7 @@ class ExperimentTab(ttk.Frame):
 
     @staticmethod
     def _do_experiment(input_dir: str, out_dir: str, chunk_size: int,
-                       mode: str) -> tuple:
+                       mode: str, clean: bool) -> tuple:
         """后台线程执行：可选切片 + 分组实验，返回 (stats, out_dir)。
 
         只调用 experiments 包的核心函数，不复制实验逻辑。
@@ -1833,7 +1840,8 @@ class ExperimentTab(ttk.Frame):
             exp_input = Path(input_dir)
             if mode == "slice":
                 sliced_dir = Path(out_dir) / "sliced_corpus"
-                written = slice_corpus(Path(input_dir), sliced_dir, chunk_size)
+                written = slice_corpus(Path(input_dir), sliced_dir,
+                                       chunk_size, clean=clean)
                 if not written:
                     raise ValueError(
                         "切片结果为空：所有文本都短于 0.5 × 切片词数，"
