@@ -27,6 +27,7 @@ from experiments.story_stats import (  # noqa: E402
     wilcoxon_stats,
 )
 from core.linguistic_fingerprint import cohens_d  # noqa: E402
+from tests import has_matplotlib  # noqa: E402
 
 
 # ── 构造数据工具 ──────────────────────────────────────────────────────
@@ -203,9 +204,7 @@ def test_equal_chunk_robustness_on_constructed_data():
 
 def test_run_experiment_story_artifacts():
     """完整流水线产出三个新 CSV 且 report.md 末尾追加新章节。"""
-    try:
-        import matplotlib  # noqa: F401
-    except ImportError:
+    if not has_matplotlib():
         print("    (skipped: matplotlib not installed)")
         return
 

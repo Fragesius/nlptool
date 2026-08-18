@@ -5,8 +5,6 @@ import os
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from pathlib import Path
-
 from core.stylometry import (
     tokenize,
     build_freq_table,
@@ -15,7 +13,9 @@ from core.stylometry import (
     hierarchical_cluster,
 )
 
-SAMPLE_DIR = Path(__file__).resolve().parent.parent / "experiments" / "sample_corpus"
+from tests import _SAMPLE_DIR
+
+SAMPLE_DIR = _SAMPLE_DIR
 
 
 def test_tokenize():

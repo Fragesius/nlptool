@@ -52,18 +52,20 @@ from core.stylometry import (  # noqa: E402
     delta_matrix,
     hierarchical_cluster,
 )
-from core.analyzer import tokenize_many  # noqa: E402
 from core.linguistic_fingerprint import (  # noqa: E402
-    SegmentInfo,
-    build_global_vocab,
-    extract_features,
-    extract_sentence_stats_many,
     weighted_cosine_similarity,
     wilcoxon_signed_rank_test,
     permutation_test,
     cohens_d,
 )
 from viz.dendrogram import plot_dendrogram  # noqa: E402
+from experiments.csv_io import (  # noqa: E402
+    write_delta_csv,
+    write_fingerprint_pairs_csv,
+    write_nn_predictions_csv,
+    write_signal_competition_csv,
+)
+from experiments.export_paper_data import _flatten  # noqa: E402
 from experiments.group_metrics import (  # noqa: E402
     nearest_neighbor_loo,
     signal_competition,
@@ -73,6 +75,10 @@ from experiments.story_stats import (  # noqa: E402
     bootstrap_d_ci,
     equal_chunk_robustness,
     story_wilcoxon,
+)
+from experiments.weight_sensitivity import (  # noqa: E402
+    _mean_std,
+    extract_corpus_features,
 )
 
 
@@ -115,22 +121,6 @@ def load_groups(input_dir: Path) -> Dict[str, Dict[str, str]]:
                 f"need at least 2 to compute within-group statistics"
             )
     return groups
-
-
-def _mean_std(values: List[float]) -> Tuple[float, float]:
-    """Return (mean, sample std) of a list (std=0 for n<2).
-
-    Uses the sample standard deviation (divisor n-1), the convention
-    expected by ``cohens_d``'s pooled-variance formula.
-    """
-    n = len(values)
-    if n == 0:
-        return 0.0, 0.0
-    mean = sum(values) / n
-    if n < 2:
-        return mean, 0.0
-    var = sum((v - mean) ** 2 for v in values) / (n - 1)
-    return mean, math.sqrt(var)
 
 
 def _effect_size_note(d: float) -> str:
@@ -299,12 +289,7 @@ def run(
     group_names = list(groups.keys())
 
     # Flatten samples, remembering each sample's group.
-    texts: Dict[str, str] = {}
-    group_of: Dict[str, str] = {}
-    for gname, samples in groups.items():
-        for label, text in samples.items():
-            texts[label] = text
-            group_of[label] = gname
+    texts, group_of = _flatten(groups)
     labels = list(texts.keys())
     n_samples = len(labels)
     print(f"Loaded {n_samples} samples in {len(groups)} group(s): "
@@ -322,11 +307,7 @@ def run(
     dm_labels: List[str] = dm["labels"]  # type: ignore[assignment]
 
     csv_path = out_dir / "delta_matrix.csv"
-    with csv_path.open("w", newline="", encoding="utf-8-sig") as f:
-        writer = csv.writer(f)
-        writer.writerow([""] + dm_labels)
-        for label, row in zip(dm_labels, matrix):
-            writer.writerow([label] + [f"{d:.6f}" for d in row])
+    write_delta_csv(csv_path, dm_labels, matrix)
     print(f"Delta matrix written: {csv_path}")
 
     _progress(0, 1, "聚类与树状图")
@@ -370,13 +351,7 @@ def run(
     nn_per_group: Dict[str, Tuple[int, int]] = nn["per_group"]  # type: ignore[assignment]
 
     nn_path = out_dir / "nn_predictions.csv"
-    with nn_path.open("w", newline="", encoding="utf-8-sig") as f:
-        writer = csv.writer(f)
-        writer.writerow(
-            ["sample", "true_group", "nn_sample", "nn_group", "hit"])
-        for p in nn["predictions"]:  # type: ignore[union-attr]
-            writer.writerow([p["sample"], p["true_group"], p["nn_sample"],
-                             p["nn_group"], "1" if p["hit"] else "0"])
+    write_nn_predictions_csv(nn_path, nn["predictions"])  # type: ignore[arg-type]
     print(f"1-NN LOO accuracy: {nn_accuracy:.4f} "
           f"(baseline {nn_baseline:.4f}); written: {nn_path}")
 
@@ -392,16 +367,7 @@ def run(
     sc_p: float = sc["p_value"]  # type: ignore[assignment]
 
     sc_path = out_dir / "signal_competition.csv"
-    with sc_path.open("w", newline="", encoding="utf-8-sig") as f:
-        writer = csv.writer(f)
-        writer.writerow(["work", "group_a", "group_b",
-                         "cross_translator_dist", "same_translator_dist",
-                         "winner"])
-        for row in sc["pairs"]:  # type: ignore[union-attr]
-            writer.writerow([row["work"], row["group_a"], row["group_b"],
-                             f"{row['cross_translator_dist']:.6f}",
-                             f"{row['same_translator_dist']:.6f}",
-                             row["winner"]])
+    write_signal_competition_csv(sc_path, sc["pairs"])  # type: ignore[arg-type]
     print(f"Signal competition: original {sc_wins_o} vs "
           f"translator {sc_wins_t} (ties {sc_ties}, sign-test "
           f"p={sc_p:.4f}); written: {sc_path}")
@@ -409,25 +375,11 @@ def run(
     # ------------------------------------------------------------------
     # (c) Pairwise linguistic fingerprint similarity
     # ------------------------------------------------------------------
-    # 性能重构（v2.0.0）：每个样本只分词一次、只提取一次特征。
-    # - tokenize_many：英文走 spaCy nlp.pipe 批处理，结果与逐条分词一致；
-    # - extract_sentence_stats_many：全部句子一次性批量分词；
-    # - 预分词结果同时供 build_global_vocab 与 extract_features 复用，
-    #   避免旧路径中"建词汇表一遍、提特征又一遍"的重复分词。
+    # 特征提取委托给 weight_sensitivity.extract_corpus_features（与旧内联
+    # 实现同一条路径：tokenize_many 批量分词 + 共享全局词汇表，逐位一致）。
     _progress(0, n_samples, "指纹特征提取")
-    text_list = [texts[label] for label in labels]
-    token_list = tokenize_many(text_list, lang)
-    sent_stats_list = extract_sentence_stats_many(text_list, lang)
-
-    vocab = build_global_vocab(text_list, lang, tokenized=token_list)
-    fvs = {}
-    for feat_idx, (label, text, toks, sst) in enumerate(
-            zip(labels, text_list, token_list, sent_stats_list), start=1):
-        seg = SegmentInfo(
-            text=text, segment_index=0, char_count=len(text), lang=lang
-        )
-        fvs[label] = extract_features(seg, vocab, tokens=toks, sent_stats=sst)
-        _progress(feat_idx, n_samples, "指纹特征提取")
+    _, _, fvs = extract_corpus_features(input_dir, lang)
+    _progress(n_samples, n_samples, "指纹特征提取")
 
     # Similarity of every unordered pair, grouped by same/cross translator.
     sim_pair: Dict[Tuple[str, str], float] = {}
@@ -448,12 +400,11 @@ def run(
             _progress(done_sim_pairs, total_sim_pairs, "指纹配对")
 
     pairs_path = out_dir / "fingerprint_pairs.csv"
-    with pairs_path.open("w", newline="", encoding="utf-8-sig") as f:
-        writer = csv.writer(f)
-        writer.writerow(["sample_a", "sample_b", "pair_type", "similarity"])
-        for (la, lb), sim in sim_pair.items():
-            ptype = "same" if group_of[la] == group_of[lb] else "cross"
-            writer.writerow([la, lb, ptype, f"{sim:.6f}"])
+    write_fingerprint_pairs_csv(
+        pairs_path,
+        ((la, lb, "same" if group_of[la] == group_of[lb] else "cross", sim)
+         for (la, lb), sim in sim_pair.items()),
+    )
     print(f"Pairwise fingerprint similarities written: {pairs_path}")
 
     same_mean, same_std = _mean_std(same_sims)
@@ -733,7 +684,6 @@ def run(
         "p_permutation": p_perm,
         "cohens_d": d_val,
         "significant": significant,
-        # report.md 结论段的中文模板文字，供 GUI 等调用方直接展示
         "conclusion": conclusion_zh,
         # v2.2.0 新增：故事级统计与稳健性检验
         "story_wilcoxon_n": sw_stats["n"],

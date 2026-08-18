@@ -12,6 +12,7 @@ from __future__ import annotations
 import os
 import re
 import sys
+import threading
 from collections import Counter
 from dataclasses import dataclass, field
 from typing import List, Optional
@@ -433,20 +434,7 @@ def tokenize_zh(text: str) -> List[Token]:
 
 def _tokens_from_doc(doc) -> List[Token]:
     """将 spaCy Doc 转为 Token 列表（tokenize_en 与批量分词共用）。"""
-    tokens: List[Token] = []
-    for t in doc:
-        if t.is_space:
-            continue
-        tokens.append(
-            Token(
-                text=t.text,
-                pos=t.pos_,
-                lemma=t.lemma_.lower(),
-                is_stop=t.is_stop or t.text.lower() in _EN_STOP,
-                lang="en",
-            )
-        )
-    return tokens
+    return _spacy_doc_to_tokens(doc, "en")
 
 
 def tokenize_en(text: str) -> List[Token]:
@@ -465,7 +453,11 @@ def tokenize_en(text: str) -> List[Token]:
     return tokens
 
 
-def tokenize_many(texts: List[str], lang: str) -> List[List[Token]]:
+def tokenize_many(
+    texts: List[str],
+    lang: str,
+    disable: Optional[List[str]] = None,
+) -> List[List[Token]]:
     """批量分词，结果与逐条调用 ``tokenize(t, lang)`` 完全一致。
 
     英文且 spaCy 可用时走 ``nlp.pipe`` 批处理（管线内部按批次并行，
@@ -474,12 +466,23 @@ def tokenize_many(texts: List[str], lang: str) -> List[List[Token]]:
 
     :param texts: 待分词文本列表
     :param lang: 语言代码（"en" / "zh" / "mixed" 等，同 ``tokenize``）
+    :param disable: 可选，要禁用的 spaCy 管线组件名列表（如
+                    ``["tagger", "parser"]``），或字符串 ``"all"`` 表示
+                    禁用全部管线组件只保留分词器。分词结果（token 文本
+                    序列）只依赖 tokenizer 规则，与是否禁用后续组件无关；
+                    但禁用后 Token 的 pos/lemma/is_stop 等属性为空或
+                    缺省值，仅适合只消费 ``Token.text`` 的调用方。
+                    缺省 None 时走完整管线，行为与旧版逐字节一致。
     :return: 与 ``texts`` 一一对应的 Token 列表的列表
     """
     if lang == "en":
         nlp = _get_spacy("en")
         if nlp:
-            return [_tokens_from_doc(doc) for doc in nlp.pipe(texts)]
+            if disable is None:
+                return [_tokens_from_doc(doc) for doc in nlp.pipe(texts)]
+            if disable == "all":
+                disable = list(nlp.pipe_names)
+            return [_tokens_from_doc(doc) for doc in nlp.pipe(texts, disable=disable)]
     return [tokenize(t, lang) for t in texts]
 
 
@@ -517,7 +520,9 @@ def analyze_basic(text: str, lang: Optional[str] = None) -> BasicResult:
     sentences: List[Sentence] = []
     for s in sents_text:
         s_lang = detect_language(s)
-        sentences.append(Sentence(text=s, lang=s_lang, tokens=tokenize(s, s_lang)))
+        # 不再逐句分词填充 tokens：全仓库无任何代码读取 Sentence.tokens，
+        # 逐句 tokenize 是纯浪费；字段保留以兼容旧代码。
+        sentences.append(Sentence(text=s, lang=s_lang))
 
     # 词频：去掉标点与停用词
     meaningful = [
@@ -597,37 +602,7 @@ def dependencies(text: str, lang: Optional[str] = None) -> List[dict]:
         return []
 
     doc = nlp(text)
-    # 为每个句子建立 token 索引映射（-> 句内序号）
-    sent_boundaries: List[tuple] = []  # [(start_i, end_i), ...]
-    for sent in doc.sents:
-        sent_boundaries.append((sent.start, sent.end))
-
-    deps: List[dict] = []
-    for t in doc:
-        if t.is_space:
-            continue
-        # 找到该 token 所属的句子 id 和句内序号
-        sent_id = 0
-        sent_i = 0
-        for sid, (s_start, s_end) in enumerate(sent_boundaries):
-            if s_start <= t.i < s_end:
-                sent_id = sid
-                sent_i = t.i - s_start
-                break
-        deps.append(
-            {
-                "text": t.text,
-                "pos": t.pos_,
-                "dep": t.dep_,
-                "head_text": t.head.text,
-                "head_pos": t.head.pos_,
-                "head_i": t.head.i,        # head token 的全局序号
-                "token_i": t.i,            # 当前 token 自身的全局序号
-                "sent_id": sent_id,        # 句子编号
-                "sent_i": sent_i,          # 句内序号
-            }
-        )
-    return deps
+    return _spacy_doc_to_deps(doc)
 
 
 def _dependencies_mixed(text: str) -> List[dict]:
@@ -687,6 +662,32 @@ def _lexicon_sentiment(text: str, lang: str) -> Optional[float]:
     return score / max(len(tokens), 1)
 
 
+# VADER 分析器惰性单例：SentimentIntensityAnalyzer() 每次构造都会重新
+# 加载 vader_lexicon 词表文件，逐句情感分析（make_sentiment_trend）下
+# 浪费显著。词表下载检查与返回值口径与原逐次构造完全一致。
+_VADER_LOCK = threading.Lock()
+_VADER_ANALYZER = None
+
+
+def _get_vader():
+    """返回进程级共享的 VADER SentimentIntensityAnalyzer（线程安全惰性初始化）。"""
+    global _VADER_ANALYZER
+    if _VADER_ANALYZER is None:
+        with _VADER_LOCK:
+            if _VADER_ANALYZER is None:
+                import nltk  # type: ignore
+                from nltk.sentiment.vader import (  # type: ignore
+                    SentimentIntensityAnalyzer,
+                )
+
+                try:
+                    nltk.data.find("sentiment/vader_lexicon.zip")
+                except LookupError:
+                    nltk.download("vader_lexicon", quiet=True)
+                _VADER_ANALYZER = SentimentIntensityAnalyzer()
+    return _VADER_ANALYZER
+
+
 def sentiment(text: str, lang: Optional[str] = None) -> dict:
     """情感分析。优先 SnowNLP（中）/ VADER（英），回退到内置词典。"""
     lang = lang or detect_language(text)
@@ -697,6 +698,8 @@ def sentiment(text: str, lang: Optional[str] = None) -> dict:
         try:
             from snownlp import SnowNLP  # type: ignore
 
+            # SnowNLP 的模型数据在 snownlp 模块 import 时已加载，
+            # 实例化本身极轻（实测微秒级），逐句实例化无性能问题。
             raw = SnowNLP(text).sentiments  # 0..1
             score = raw * 2 - 1
         except Exception:
@@ -709,14 +712,7 @@ def sentiment(text: str, lang: Optional[str] = None) -> dict:
                 raw = 0.5  # 中性默认值，避免返回 None
     else:
         try:
-            import nltk  # type: ignore
-            from nltk.sentiment.vader import SentimentIntensityAnalyzer  # type: ignore
-
-            try:
-                nltk.data.find("sentiment/vader_lexicon.zip")
-            except LookupError:
-                nltk.download("vader_lexicon", quiet=True)
-            raw = SentimentIntensityAnalyzer().polarity_scores(text)["compound"]
+            raw = _get_vader().polarity_scores(text)["compound"]
             score = raw
         except Exception:
             lex = _lexicon_sentiment(text, "en")
@@ -796,7 +792,7 @@ def _spacy_doc_to_ner(doc) -> List[dict]:
 def _spacy_doc_to_deps(doc) -> List[dict]:
     """从 spaCy ``Doc`` 提取依存关系（含 sent_id / sent_i）。
 
-    复刻 :func:`dependencies` 单语路径的逻辑，但不重新调用 ``nlp``。
+    也是 :func:`dependencies` 单语路径的实现，不重新调用 ``nlp``。
     """
     sent_boundaries: List[tuple] = [(s.start, s.end) for s in doc.sents]
     deps: List[dict] = []
@@ -830,7 +826,8 @@ def _spacy_doc_to_deps(doc) -> List[dict]:
 def _spacy_doc_to_tokens(doc, lang: str) -> List[Token]:
     """从 spaCy ``Doc`` 提取 :class:`Token` 列表。
 
-    复刻 :func:`tokenize_en` 的 spaCy 路径，但不重新调用 ``nlp``。
+    也是 ``tokenize_en`` 的 spaCy 路径实现（经 ``_tokens_from_doc``），
+    不重新调用 ``nlp``。
     """
     stop_set = _ZH_STOP if lang == "zh" else _EN_STOP
     tokens: List[Token] = []

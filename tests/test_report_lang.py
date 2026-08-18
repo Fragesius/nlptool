@@ -16,18 +16,12 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 _ROOT = Path(__file__).resolve().parent.parent
 _CJK_RE = re.compile(r"[一-鿿]")
 
+from tests import has_matplotlib  # noqa: E402
+
 _GROUP_MAP = {
     "translator_A": ["text_the_a.txt", "text_the_b.txt"],
     "translator_B": ["text_of_a.txt", "text_of_b.txt"],
 }
-
-
-def _matplotlib_available() -> bool:
-    try:
-        import matplotlib  # noqa: F401
-        return True
-    except ImportError:
-        return False
 
 
 def _run_experiment(out: Path, **kwargs):
@@ -41,7 +35,7 @@ def _run_experiment(out: Path, **kwargs):
 
 def test_report_lang_en_contains_no_chinese():
     """--report-lang en: report.md must not contain any CJK characters."""
-    if not _matplotlib_available():
+    if not has_matplotlib():
         print("    (skipped: matplotlib not installed)")
         return
 
@@ -59,7 +53,7 @@ def test_report_lang_en_contains_no_chinese():
 def test_report_lang_default_matches_explicit_zh():
     """Default (zh) report.md is byte-identical to --report-lang zh,
     and keeps the v2.0.0 Chinese section heading."""
-    if not _matplotlib_available():
+    if not has_matplotlib():
         print("    (skipped: matplotlib not installed)")
         return
 
@@ -83,7 +77,7 @@ def test_report_lang_default_matches_explicit_zh():
 def test_report_lang_en_numeric_outputs_unchanged():
     """report-lang only affects template text: CSVs and key stats are
     identical between zh and en runs."""
-    if not _matplotlib_available():
+    if not has_matplotlib():
         print("    (skipped: matplotlib not installed)")
         return
 

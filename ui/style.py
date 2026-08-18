@@ -109,23 +109,6 @@ def toggle_appearance() -> str:
     return set_appearance("light" if is_dark() else "dark")
 
 
-def detect_system_dark_mode() -> bool:
-    """读取 Windows 注册表，判断系统是否深色模式。非 Windows 返回 False。"""
-    if sys.platform != "win32":
-        return False
-    try:
-        import winreg
-        key = winreg.OpenKey(
-            winreg.HKEY_CURRENT_USER,
-            r"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize"
-        )
-        value, _ = winreg.QueryValueEx(key, "AppsUseLightTheme")
-        winreg.CloseKey(key)
-        return value == 0  # 0 = dark, 1 = light
-    except Exception:
-        return False
-
-
 # --------------------------------------------------------------------------- #
 # 高 DPI
 # --------------------------------------------------------------------------- #

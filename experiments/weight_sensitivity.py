@@ -70,6 +70,7 @@ from experiments.group_metrics import (  # noqa: E402
     nearest_neighbor_loo,
     signal_competition,
 )
+from experiments.export_paper_data import _flatten  # noqa: E402
 
 __all__ = [
     "DIMENSIONS",
@@ -189,12 +190,7 @@ def extract_corpus_features(input_dir: Path, lang: str = "en"):
 
     groups = load_groups(Path(input_dir))
 
-    texts: Dict[str, str] = {}
-    group_of: Dict[str, str] = {}
-    for gname, samples in groups.items():
-        for label, text in samples.items():
-            texts[label] = text
-            group_of[label] = gname
+    texts, group_of = _flatten(groups)
     labels = list(texts.keys())
 
     text_list = [texts[label] for label in labels]
@@ -218,7 +214,12 @@ def extract_corpus_features(input_dir: Path, lang: str = "en"):
 
 
 def _mean_std(values: List[float]) -> Tuple[float, float]:
-    """Return (mean, sample std) — same convention as run_experiment."""
+    """Return (mean, sample std) of a list (std=0 for n<2).
+
+    Uses the sample standard deviation (divisor n-1), the convention
+    expected by ``cohens_d``'s pooled-variance formula. Shared with
+    ``run_experiment`` (which imports it from here).
+    """
     n = len(values)
     if n == 0:
         return 0.0, 0.0

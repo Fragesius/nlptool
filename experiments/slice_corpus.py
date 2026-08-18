@@ -30,6 +30,11 @@ import sys
 from pathlib import Path
 from typing import List
 
+# Allow running directly from the repository root.
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+from core.stylometry import TOKEN_PATTERN  # noqa: E402
+
 
 def clean_output_dir(out_dir: Path) -> int:
     """清空输出目录下的全部内容（切片前调用）。
@@ -61,7 +66,7 @@ def clean_output_dir(out_dir: Path) -> int:
     return len(entries)
 
 # Same token pattern as core.stylometry.tokenize.
-_TOKEN_RE = re.compile(r"[A-Za-z]+")
+_TOKEN_RE = re.compile(TOKEN_PATTERN)
 
 
 def chunk_text(text: str, chunk_size: int = 2000) -> List[str]:

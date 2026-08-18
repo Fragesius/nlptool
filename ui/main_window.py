@@ -7,7 +7,7 @@ from tkinter import messagebox, filedialog
 
 import customtkinter as ctk
 
-from core import analyzer, api_backend, file_io
+from core import analyzer, api_backend, file_io, __version__
 from ui import style as s
 from ui.style import (
     enable_dpi_awareness,
@@ -621,7 +621,7 @@ class App:
     def about(self) -> None:
         messagebox.showinfo(
             "关于",
-            "📝 汉英 NLP 分析工具  V2.0.0\n"
+            f"📝 汉英 NLP 分析工具  V{__version__}\n"
             "Python + customtkinter · 本地与云端混合\n\n"
             "作者：Fragesius\n"
             "联系方式：fragesius@gmail.com\n\n"

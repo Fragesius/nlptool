@@ -33,17 +33,10 @@ from experiments.weight_sensitivity import (  # noqa: E402
     variants_for_scheme,
     run_sensitivity,
 )
+from core.stylometry import TOKEN_PATTERN  # noqa: E402
+from tests import _SAMPLE_DIR, has_matplotlib  # noqa: E402
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent
-_SAMPLE_DIR = _REPO_ROOT / "experiments" / "sample_corpus"
-
-
-def _has_matplotlib() -> bool:
-    try:
-        import matplotlib  # noqa: F401
-        return True
-    except ImportError:
-        return False
 
 
 # ── 变体生成 ──────────────────────────────────────────────────────────
@@ -240,7 +233,7 @@ def _build_paired_groups(root: Path, chunk_size: int) -> Path:
 def test_default_variant_matches_run_experiment():
     """The default variant reproduces the existing fingerprint metrics
     exactly (byte-identical acceptance criterion)."""
-    if not _has_matplotlib():
+    if not has_matplotlib():
         print("    (skipped: matplotlib not installed)")
         return
 
@@ -268,7 +261,7 @@ def test_default_variant_matches_run_experiment():
 
 def test_run_sensitivity_csv_and_report():
     """lodo x 2 scales: 16 CSV rows; report.md is appended, never edited."""
-    if not _has_matplotlib():
+    if not has_matplotlib():
         print("    (skipped: matplotlib not installed)")
         return
 
@@ -311,7 +304,7 @@ def test_run_sensitivity_csv_and_report():
 def test_all_schemes_produce_rows():
     """Every scheme evaluates cleanly on one scale (uniform + single +
     random smoke test)."""
-    if not _has_matplotlib():
+    if not has_matplotlib():
         print("    (skipped: matplotlib not installed)")
         return
 
@@ -341,7 +334,7 @@ def _build_unbalanced_groups(root: Path, chunk_size: int) -> Path:
         return next(_SAMPLE_DIR.rglob(fname)).read_text(encoding="utf-8")
 
     def _first_words(text: str, n: int) -> str:
-        ends = [m.end() for m in re.finditer(r"[A-Za-z]+", text)]
+        ends = [m.end() for m in re.finditer(TOKEN_PATTERN, text)]
         assert len(ends) >= n
         return text[: ends[n - 1]]
 
@@ -370,7 +363,7 @@ def _build_unbalanced_groups(root: Path, chunk_size: int) -> Path:
 def test_scales_produce_distinct_rows_and_true_baselines():
     """Bug-1 自检：同一变体在三档尺度上的 d 不得全部相同，且
     knn_baseline 必须等于按各尺度 chunk 数独立算出的多数类比例。"""
-    if not _has_matplotlib():
+    if not has_matplotlib():
         print("    (skipped: matplotlib not installed)")
         return
 
@@ -437,7 +430,7 @@ def test_all_scheme_is_38_variants():
 
 def test_all_scheme_full_table_and_overwrite():
     """Bug-2 自检：all × 3 尺度 = 114 行；重复运行覆盖写，行数不增。"""
-    if not _has_matplotlib():
+    if not has_matplotlib():
         print("    (skipped: matplotlib not installed)")
         return
 

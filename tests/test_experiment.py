@@ -19,9 +19,10 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from experiments.slice_corpus import chunk_text, slice_corpus  # noqa: E402
+from core.stylometry import TOKEN_PATTERN  # noqa: E402
+from tests import _SAMPLE_DIR, has_matplotlib  # noqa: E402
 
-_WORD_RE = re.compile(r"[A-Za-z]+")
-_SAMPLE_DIR = Path(__file__).resolve().parent.parent / "experiments" / "sample_corpus"
+_WORD_RE = re.compile(TOKEN_PATTERN)
 
 
 def _word_count(text: str) -> int:
@@ -166,9 +167,7 @@ def _build_groups(root: Path, group_map: dict, chunk_size: int = 0) -> Path:
 
 def test_run_experiment_full_pipeline():
     """Full grouped experiment over *sliced* samples separates the groups."""
-    try:
-        import matplotlib  # noqa: F401
-    except ImportError:
+    if not has_matplotlib():
         print("    (skipped: matplotlib not installed)")
         return
 
@@ -214,9 +213,7 @@ def test_run_experiment_full_pipeline():
 
 def test_run_experiment_warns_without_separation():
     """Indistinguishable groups trigger the no-separation sanity warning."""
-    try:
-        import matplotlib  # noqa: F401
-    except ImportError:
+    if not has_matplotlib():
         print("    (skipped: matplotlib not installed)")
         return
 
@@ -248,9 +245,7 @@ def test_run_experiment_warns_without_separation():
 
 def test_run_experiment_returns_result_dict():
     """run() 可作为库函数被外部（如 GUI）调用，返回结构化结果字典。"""
-    try:
-        import matplotlib  # noqa: F401
-    except ImportError:
+    if not has_matplotlib():
         print("    (skipped: matplotlib not installed)")
         return
 

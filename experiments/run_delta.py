@@ -1,5 +1,10 @@
 """Burrows' Delta stylometry command-line entry point (no UI).
 
+.. deprecated:: v2.4.0
+    功能已被 ``experiments/run_experiment.py`` 完全覆盖
+    （分组结构 + 更完整的报告输出），本脚本仅保留作兼容，
+    新实验请使用 run_experiment.py。
+
 Usage:
     python experiments/run_delta.py --input experiments/sample_corpus \
         --out experiments/output [--top-n 100]
@@ -12,8 +17,8 @@ information to stdout.
 from __future__ import annotations
 
 import argparse
-import csv
 import sys
+import warnings
 from pathlib import Path
 
 # 允许从仓库根目录直接运行
@@ -27,6 +32,7 @@ from core.stylometry import (  # noqa: E402
     hierarchical_cluster,
 )
 from viz.dendrogram import plot_dendrogram  # noqa: E402
+from experiments.csv_io import write_delta_csv  # noqa: E402
 
 
 def load_corpus(input_dir: Path) -> dict:
@@ -49,6 +55,12 @@ def print_merges(node: dict, depth: int = 0) -> None:
 
 
 def main() -> None:
+    warnings.warn(
+        "run_delta.py is deprecated since v2.4.0; "
+        "use experiments/run_experiment.py instead.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
     parser = argparse.ArgumentParser(
         description="Burrows' Delta stylometry: author/translator style clustering"
     )
@@ -88,11 +100,7 @@ def main() -> None:
     matrix = dm["matrix"]
 
     csv_path = out_dir / "delta_matrix.csv"
-    with csv_path.open("w", newline="", encoding="utf-8-sig") as f:
-        writer = csv.writer(f)
-        writer.writerow([""] + labels)
-        for label, row in zip(labels, matrix):
-            writer.writerow([label] + [f"{d:.6f}" for d in row])
+    write_delta_csv(csv_path, labels, matrix)
     print(f"\nDelta distance matrix written: {csv_path}")
     for label, row in zip(labels, matrix):
         print("  " + label.ljust(16) + "  ".join(f"{d:.4f}" for d in row))

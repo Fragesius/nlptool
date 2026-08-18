@@ -17,7 +17,7 @@ from __future__ import annotations
 import re
 import os
 from html.parser import HTMLParser
-from typing import List, Optional
+from typing import List
 
 from core.log import logger
 
@@ -29,7 +29,8 @@ _ENCODINGS = ["utf-8", "gbk", "gb2312", "gb18030", "utf-16", "big5", "latin-1"]
 
 def _detect_encoding(filepath: str) -> str:
     """按优先级尝试各编码，找到第一个成功解码的。"""
-    raw = open(filepath, "rb").read()
+    with open(filepath, "rb") as f:
+        raw = f.read()
     for enc in _ENCODINGS:
         try:
             raw.decode(enc)
@@ -276,22 +277,3 @@ def read_file_with_label(filepath: str) -> tuple:
     char_count = _strip_chars(text)
     filename = os.path.basename(filepath)
     return (text, f"✅ {filename}  —  {char_count:,} 字符")
-
-
-def get_file_summary(filepath: str) -> str:
-    """快速获取文件摘要（不读取全部内容）。
-
-    Returns:
-        格式: "文件名  —  大小"
-    """
-    if not os.path.exists(filepath):
-        return "文件不存在"
-    name = os.path.basename(filepath)
-    size = os.path.getsize(filepath)
-    if size < 1024:
-        size_str = f"{size} B"
-    elif size < 1024 * 1024:
-        size_str = f"{size / 1024:.1f} KB"
-    else:
-        size_str = f"{size / (1024 * 1024):.1f} MB"
-    return f"{name}  —  {size_str}"

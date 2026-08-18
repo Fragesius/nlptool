@@ -128,7 +128,7 @@ def chinese_readability(text: str) -> ZhReadability:
         level = "困难"
     return ZhReadability(
         avg_sentence_length=round(asl, 2),
-        avg_word_length=round(round(awl, 2), 2),
+        avg_word_length=round(awl, 2),
         word_richness=round(richness, 3),
         score=round(score, 1),
         level=level,

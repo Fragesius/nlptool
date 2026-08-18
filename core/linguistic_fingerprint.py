@@ -26,7 +26,7 @@ import math
 import random
 import re
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Tuple
+from typing import Callable, Dict, List, Optional, Tuple
 
 from core.analyzer import (  # type: ignore[import]
     Token,
@@ -193,11 +193,10 @@ class FeatureVector:
     punct_dist: List[float] = field(default_factory=list)
     ttr: float = 0.0           # Type-Token Ratio，词汇丰富度
     hapax_ratio: float = 0.0   # Hapax Legomena 比例（仅出现一次的词的占比）
-    raw_vector: List[float] = field(default_factory=list)
     segment_index: int = 0
     # 各向量维度的 L2 范数缓存（键为维度名）。
     # 两两相似度场景下同一向量的范数被重复使用 O(n) 次，缓存后只算一次；
-    # 范数计算公式与 cosine_similarity 内部完全一致，结果零变化。
+    # 范数即标准 L2 范数 sqrt(sum(x*x))，结果零变化。
     _norms: Dict[str, float] = field(default_factory=dict, repr=False, compare=False)
 
 
@@ -227,7 +226,6 @@ class AuthorProfile:
     author_label: str
     segments: List[SegmentInfo] = field(default_factory=list)
     feature_vectors: List[FeatureVector] = field(default_factory=list)
-    aggregate_vector: List[float] = field(default_factory=list)
 
 
 @dataclass
@@ -244,11 +242,6 @@ class SimilarityResult:
 class FingerprintResult:
     """语言指纹分析完整结果。"""
 
-    suspect_profile: AuthorProfile = field(default_factory=lambda: AuthorProfile("A"))
-    suspect_author_profile: AuthorProfile = field(
-        default_factory=lambda: AuthorProfile("B")
-    )
-    control_profiles: List[AuthorProfile] = field(default_factory=list)
     similarity_to_b: SimilarityResult = field(
         default_factory=lambda: SimilarityResult("B")
     )
@@ -471,7 +464,7 @@ def _clean_for_char_ngram(text: str, lang: str) -> str:
 
 
 def extract_char_ngrams(
-    text: str, n: int, top_n: int, lang: str, global_vocab: List[str]
+    text: str, n: int, lang: str, global_vocab: List[str]
 ) -> List[float]:
     """字符级 n-gram 频率（按 global_vocab 顺序）。"""
     clean = _clean_for_char_ngram(text, lang)
@@ -553,18 +546,25 @@ def extract_sentence_stats(text: str, lang: str) -> Tuple[float, float]:
 
 
 def extract_sentence_stats_many(
-    texts: List[str], lang: str
+    texts: List[str],
+    lang: str,
+    disable: Optional[List[str]] = None,
 ) -> List[Tuple[float, float]]:
     """批量版 ``extract_sentence_stats``：结果与逐文本调用完全一致。
 
     全部文本的句子收集后一次性批量分词（英文走 spaCy ``nlp.pipe``），
     避免"每句一次 spaCy 调用"的巨量开销；均值/标准差公式不变。
+
+    :param disable: 可选，透传给内部 ``tokenize_many`` 的 spaCy 管线
+                    组件禁用列表（句长统计只消费 Token.text，禁用神经
+                    组件不影响分词文本序列）；缺省 None 走完整管线，
+                    行为与旧版逐字节一致。
     """
     from core.analyzer import tokenize_many  # 延迟导入，避免循环依赖
 
     sent_lists = [split_sentences(t) for t in texts]
     flat = [s for sents in sent_lists for s in sents]
-    flat_tokens = tokenize_many(flat, lang) if flat else []
+    flat_tokens = tokenize_many(flat, lang, disable=disable) if flat else []
 
     results: List[Tuple[float, float]] = []
     pos = 0
@@ -737,7 +737,7 @@ def extract_features(
 
     wld = extract_word_length_dist(tokens, lang)
     fwf = extract_function_word_freq(tokens, lang, global_vocab.get("func", []))
-    cng = extract_char_ngrams(segment.text, 4, 100, lang, global_vocab.get("char_ngram", []))
+    cng = extract_char_ngrams(segment.text, 4, lang, global_vocab.get("char_ngram", []))
     wbg = extract_word_bigrams(tokens, lang, global_vocab.get("word_bigram", []))
     sm, ss = (
         sent_stats
@@ -759,64 +759,12 @@ def extract_features(
         hapax_ratio=hapax,
         segment_index=segment.segment_index,
     )
-    fv.raw_vector = _flatten_and_normalize(fv)
     return fv
-
-
-def _flatten_and_normalize(fv: FeatureVector) -> List[float]:
-    """将 FeatureVector 的各维度拼接为单个向量并 L2 归一化。
-
-    保留此函数用于向后兼容（build_aggregate_vector 仍用 raw_vector）。
-    核心相似度计算已改用分维度加权方法，不再依赖此拼接向量。
-    """
-    parts: List[float] = []
-    parts.extend(fv.word_length_dist)
-    parts.extend(fv.function_word_freq)
-    parts.extend(fv.char_ngrams)
-    parts.extend(fv.word_bigrams)
-    parts.append(fv.sent_len_mean)
-    parts.append(fv.sent_len_std)
-    parts.extend(fv.punct_dist)
-    parts.append(fv.ttr)
-    parts.append(fv.hapax_ratio)
-
-    norm = math.sqrt(sum(v * v for v in parts))
-    if norm > 0:
-        return [v / norm for v in parts]
-    return parts
-
-
-def build_aggregate_vector(vectors: List[FeatureVector]) -> List[float]:
-    """多个片段向量的均值，L2 归一化。"""
-    if not vectors:
-        return []
-    n = len(vectors)
-    dim = len(vectors[0].raw_vector)
-    avg = [0.0] * dim
-    for vec in vectors:
-        for i, v in enumerate(vec.raw_vector):
-            avg[i] += v / n
-    norm = math.sqrt(sum(v * v for v in avg))
-    if norm > 0:
-        avg = [v / norm for v in avg]
-    return avg
 
 
 # =============================================================================
 # 相似度计算
 # =============================================================================
-
-
-def cosine_similarity(a: List[float], b: List[float]) -> float:
-    """余弦相似度。向量为零则返回 0。"""
-    if not a or not b or len(a) != len(b):
-        return 0.0
-    dot = sum(x * y for x, y in zip(a, b))
-    norm_a = math.sqrt(sum(x * x for x in a))
-    norm_b = math.sqrt(sum(y * y for y in b))
-    if norm_a == 0 or norm_b == 0:
-        return 0.0
-    return dot / (norm_a * norm_b)
 
 
 def _scalar_similarity(a: float, b: float) -> float:
@@ -850,6 +798,27 @@ def weighted_cosine_similarity(
                     逐字节一致；求和顺序始终按 FEATURE_WEIGHTS 的键序，
                     与传入 dict 的迭代顺序无关。
     """
+    scores = dimension_scores(fv_a, fv_b)
+
+    # 加权平均（权重可覆盖；求和顺序固定为 FEATURE_WEIGHTS 键序，
+    # 保证默认路径与旧版逐字节一致）
+    if weights is None:
+        weights = FEATURE_WEIGHTS
+    total = 0.0
+    for key in FEATURE_WEIGHTS:
+        total += weights.get(key, 0.0) * scores.get(key, 0.0)
+
+    return total
+
+
+def dimension_scores(fv_a: FeatureVector, fv_b: FeatureVector) -> Dict[str, float]:
+    """分维度相似度得分（加权余弦的八个分量，加权前）。
+
+    对每个特征维度分别计算余弦相似度（标量用 _scalar_similarity），
+    返回 ``{维度名: 得分}``，键序固定为各维度在函数内的计算顺序。
+    供 v2.3.1 的 per-dimension 得分导出使用；
+    ``weighted_cosine_similarity`` 即在此结果上加权求和。
+    """
     scores: Dict[str, float] = {}
 
     # ── 辅助：余弦相似度 + 空向量 fallback ──
@@ -857,8 +826,8 @@ def weighted_cosine_similarity(
     # 但 0 意味着"完全不相似"，会不公平地拉低总分。
     # 无数据时应给中性分 0.5，既不支持也不反对。
     # 注意：两个非空向量正交（cos=0）是真实的"不相似"信号，不应给中性分。
-    # 范数从 FeatureVector._norms 缓存取用（公式与 cosine_similarity
-    # 内部完全一致：sqrt(sum(x*x))，再 dot / (norm_a * norm_b)），
+    # 范数从 FeatureVector._norms 缓存取用（L2 范数 sqrt(sum(x*x))，
+    # 余弦即 dot / (norm_a * norm_b)），
     # 两两比较场景下每个向量的范数只计算一次，结果与逐对计算完全相同。
     def _cached_norm(fv: FeatureVector, key: str, vec: List[float]) -> float:
         cached = fv._norms.get(key)
@@ -915,15 +884,7 @@ def weighted_cosine_similarity(
     # 8. Hapax 比例
     scores["hapax_ratio"] = _scalar_similarity(fv_a.hapax_ratio, fv_b.hapax_ratio)
 
-    # 加权平均（权重可覆盖；求和顺序固定为 FEATURE_WEIGHTS 键序，
-    # 保证默认路径与旧版逐字节一致）
-    if weights is None:
-        weights = FEATURE_WEIGHTS
-    total = 0.0
-    for key in FEATURE_WEIGHTS:
-        total += weights.get(key, 0.0) * scores.get(key, 0.0)
-
-    return total
+    return scores
 
 
 def _compute_similarities(
@@ -993,29 +954,47 @@ def _build_aggregate_feature_vector(fvs: List[FeatureVector]) -> FeatureVector:
 # =============================================================================
 
 
-def _erf(x: float) -> float:
-    """误差函数近似（Abramowitz & Stegun 7.1.26）。"""
-    sign = 1 if x >= 0 else -1
-    x = abs(x)
-    a1, a2, a3, a4, a5 = 0.254829592, -0.284496736, 1.421413741, -1.453152027, 1.061405429
-    p = 0.3275911
-    t = 1.0 / (1.0 + p * x)
-    y = 1.0 - (((((a5 * t + a4) * t) + a3) * t + a2) * t + a1) * t * math.exp(-x * x)
-    return sign * y
-
-
-def _normal_cdf(x: float) -> float:
-    """标准正态分布的 CDF。"""
-    return 0.5 * (1.0 + _erf(x / math.sqrt(2.0)))
-
-
 def _normal_sf(x: float) -> float:
-    """标准正态分布的生存函数（1 - CDF）。"""
-    return 1.0 - _normal_cdf(x)
+    """标准正态分布的生存函数（1 - CDF）。
+
+    用 math.erfc 精确计算（v2.3.2 起；旧版用 Abramowitz & Stegun
+    7.1.26 近似的 _erf，误差 ~1.5e-7）。目前唯一调用方是
+    wilcoxon_signed_rank_test。
+    """
+    return 0.5 * math.erfc(x / math.sqrt(2.0))
+
+
+def _wilcoxon_rank_sums(diffs: List[float]) -> Tuple[float, float]:
+    """按标准定义计算 Wilcoxon 符号秩和 (W+, W-)。
+
+    在按 |d| 排序后的序列上直接累加带符号秩，平局取平均秩；
+    diffs 需已剔除零差值。与 experiments/story_stats.wilcoxon_stats
+    的秩和口径一致，可与 scipy / 手算对照。
+    """
+    indexed = sorted((abs(d), d > 0) for d in diffs)
+    n = len(indexed)
+    w_plus = 0.0
+    w_minus = 0.0
+    j = 0
+    while j < n:
+        k = j
+        while k < n and indexed[k][0] == indexed[j][0]:
+            k += 1
+        # 位置 j..k-1（0-indexed）对应秩 j+1..k（1-indexed），平局取平均秩
+        avg_rank = (j + k + 1) / 2.0
+        for m in range(j, k):
+            if indexed[m][1]:
+                w_plus += avg_rank
+            else:
+                w_minus += avg_rank
+        j = k
+    return w_plus, w_minus
 
 
 def wilcoxon_signed_rank_test(differences: List[float]) -> float:
     """Wilcoxon 符号秩检验（双侧），返回 p-value。
+
+    p 为正态近似（无连续性校正、无平局方差校正）。
 
     Args:
         differences: 配对观测值的差值列表 (d_i)。
@@ -1029,24 +1008,8 @@ def wilcoxon_signed_rank_test(differences: List[float]) -> float:
     if n < 3:
         return 1.0  # 样本量太小，无法拒绝 H0
 
-    # 按绝对值排序并赋秩（平均秩处理平局）
-    indexed = [(abs(d), i, d > 0) for i, d in enumerate(diffs)]
-    indexed.sort(key=lambda x: x[0])
-
-    ranks = [0.0] * n
-    j = 0
-    while j < n:
-        k = j
-        while k < n and indexed[k][0] == indexed[j][0]:
-            k += 1
-        avg_rank = (j + k + 2) / 2.0  # 1-indexed ranks averaged
-        for m in range(j, k):
-            ranks[indexed[m][1]] = avg_rank
-        j = k
-
-    w_pos = sum(r for r, (_, _, positive) in zip(ranks, indexed) if positive)
-    w_neg = sum(r for r, (_, _, positive) in zip(ranks, indexed) if not positive)
-    t_stat = min(w_pos, w_neg)
+    w_plus, w_minus = _wilcoxon_rank_sums(diffs)
+    t_stat = min(w_plus, w_minus)
 
     # 正态近似
     expected = n * (n + 1) / 4.0
@@ -1129,14 +1092,27 @@ def analyze_fingerprint(
     suspect_author_text: str,
     control_texts: List[str],
     lang: Optional[str] = None,
+    progress_callback: Optional[Callable[[int, int], None]] = None,
+    cancel_check: Optional[Callable[[], None]] = None,
 ) -> FingerprintResult:
     """运行完整的语言指纹分析。
+
+    分段后的全部片段（A → B → 各对照，与逐条构建 profile 的顺序一致）
+    一次性经 ``tokenize_many`` / ``extract_sentence_stats_many`` 批量
+    分词与句长统计（英文走 spaCy ``nlp.pipe``），再逐片段消费预计算
+    结果，避免"逐片段 + 逐句"的重复 spaCy 调用。批处理结果与逐条调用
+    完全一致，数值输出与旧版逐元素相等。
 
     Args:
         suspect_text: 可疑文本 A。
         suspect_author_text: 嫌疑作者已知文本 B。
         control_texts: 对照作者文本列表（1-3 个）。
         lang: 语言代码，None 则自动检测。
+        progress_callback: 可选进度回调 ``(done, total)``，total 为全部
+            片段数；每完成一个片段的特征提取调用一次。
+        cancel_check: 可选取消检查回调，在词汇表构建前、两个批处理调用
+            之后、以及每个片段特征提取前各调一次；回调抛出的异常原样
+            传播（供 UI 协作式取消）。
 
     Returns:
         FingerprintResult。
@@ -1180,29 +1156,72 @@ def analyze_fingerprint(
             )
 
     # --- 3. 构建全局词汇表 ---
-    vocab = build_global_vocab(all_texts, lang)
+    if cancel_check is not None:
+        cancel_check()
+    # 仍按全文本（不按片段）构建，词表内容与旧版逐字节一致；
+    # 仅分词方式改为一次性批分词后透传（tokenize_many 承诺与逐条一致）。
+    from core.analyzer import tokenize_many  # 延迟导入，避免循环依赖
+
+    # 指纹特征只消费 Token.text（extract_* 系列均不读 pos/lemma/is_stop），
+    # spaCy 分词文本序列只由 tokenizer 规则决定，与后续管线组件无关，
+    # 故批分词可禁用全部神经组件（"all"），省掉 tok2vec/tagger/parser 开销。
+    vocab_tokens = tokenize_many(all_texts, lang, disable="all")
+    vocab = build_global_vocab(all_texts, lang, tokenized=vocab_tokens)
 
     # --- 4. 分段 ---
     seg_a = segment_text(suspect_text, lang)
     seg_b = segment_text(suspect_author_text, lang)
     seg_controls = [segment_text(c, lang) for c in controls]
 
-    # --- 5. 提取特征 ---
-    def build_profile(label: str, segments: List[SegmentInfo]) -> AuthorProfile:
-        fvs = [extract_features(seg, vocab) for seg in segments]
-        agg = build_aggregate_vector(fvs)
+    # --- 5. 提取特征（批量分词） ---
+    # 按原 build_profile 的调用顺序（A → B → 各对照）拍平全部片段，
+    # 一次性批量分词 + 批量句长统计，再逐片段消费预计算结果。
+    # tokenize_many / extract_sentence_stats_many 承诺与逐条调用结果完全一致。
+    flat_segments: List[SegmentInfo] = (
+        list(seg_a) + list(seg_b) + [seg for segs in seg_controls for seg in segs]
+    )
+    seg_texts = [seg.text for seg in flat_segments]
+
+    all_tokens = tokenize_many(seg_texts, lang, disable="all")
+    if cancel_check is not None:
+        cancel_check()
+    all_sent_stats = extract_sentence_stats_many(seg_texts, lang, disable="all")
+    if cancel_check is not None:
+        cancel_check()
+
+    total_segs = len(flat_segments)
+
+    def build_profile(
+        label: str, segments: List[SegmentInfo], start: int
+    ) -> AuthorProfile:
+        fvs: List[FeatureVector] = []
+        for offset, seg in enumerate(segments):
+            if cancel_check is not None:
+                cancel_check()
+            idx = start + offset
+            fvs.append(
+                extract_features(
+                    seg,
+                    vocab,
+                    tokens=all_tokens[idx],
+                    sent_stats=all_sent_stats[idx],
+                )
+            )
+            if progress_callback is not None:
+                progress_callback(idx + 1, total_segs)
         return AuthorProfile(
             author_label=label,
             segments=segments,
             feature_vectors=fvs,
-            aggregate_vector=agg,
         )
 
-    profile_a = build_profile("A", seg_a)
-    profile_b = build_profile("B", seg_b)
-    control_profiles = [
-        build_profile(f"C{i+1}", seg) for i, seg in enumerate(seg_controls)
-    ]
+    profile_a = build_profile("A", seg_a, 0)
+    profile_b = build_profile("B", seg_b, len(seg_a))
+    pos = len(seg_a) + len(seg_b)
+    control_profiles = []
+    for i, segs in enumerate(seg_controls):
+        control_profiles.append(build_profile(f"C{i+1}", segs, pos))
+        pos += len(segs)
 
     # --- 6. 相似度计算 ---
     sim_b = _compute_similarities(profile_a, profile_b)
@@ -1251,9 +1270,6 @@ def analyze_fingerprint(
 
     # --- 8. 判定 ---
     result = FingerprintResult(
-        suspect_profile=profile_a,
-        suspect_author_profile=profile_b,
-        control_profiles=control_profiles,
         similarity_to_b=sim_b,
         similarity_to_controls=sim_controls,
         p_value_wilcoxon=p_w,

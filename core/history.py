@@ -78,12 +78,6 @@ def add_entry(entry: HistoryEntry) -> None:
     save_all(entries)
 
 
-def delete_entry(eid: str) -> None:
-    entries = load_all()
-    entries = [e for e in entries if e.id != eid]
-    save_all(entries)
-
-
 def clear_all() -> None:
     if os.path.exists(STORE_PATH):
         os.remove(STORE_PATH)

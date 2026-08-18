@@ -16,16 +16,12 @@ import matplotlib
 
 if not os.environ.get("MPLBACKEND"):
     matplotlib.use("TkAgg")
-import matplotlib.patches as mpatches  # noqa: E402
 import matplotlib.pyplot as plt  # noqa: E402
 
 from core.analyzer import (  # noqa: E402
-    BasicResult,
-    SyntaxResult,
     split_sentences,
     sentiment,
     detect_language,
-    tokenize,
 )
 from core.linguistic_fingerprint import (  # noqa: E402
     SimilarityResult,
@@ -96,16 +92,6 @@ def _apply_dark_theme(fig, ax, title: str) -> None:
     ax.spines["left"].set_color(_DARK_GRID)
     ax.spines["right"].set_color(_DARK_GRID)
     ax.grid(color=_DARK_GRID, alpha=0.3)
-
-
-def _lighten_color(hex_color: str, factor: float = 1.3) -> str:
-    """将 hex 颜色调亮以便在深色背景上可见。"""
-    hex_color = hex_color.lstrip("#")
-    r, g, b = tuple(int(hex_color[i:i + 2], 16) for i in (0, 2, 4))
-    r = min(255, int(r * factor))
-    g = min(255, int(g * factor))
-    b = min(255, int(b * factor))
-    return f"#{r:02x}{g:02x}{b:02x}"
 
 
 # --------------------------------------------------------------------------- #
@@ -216,7 +202,7 @@ def make_pos_pie(pos_dist: Counter, title: str = "词性分布",
 # ── 依存关系配色（按大类区分，视觉辨识度高）──
 _DEP_COLORS = {
     # 主语 / 从句主语
-    "nsubj": "#2563eb", "nsubjpass": "#2563eb", "csubj": "#2563eb",
+    "nsubj": "#2563eb", "csubj": "#2563eb",
     "csubjpass": "#2563eb",
     # 宾语
     "dobj": "#16a34a", "obj": "#16a34a", "iobj": "#0d9488",
@@ -905,8 +891,6 @@ def make_fingerprint_bar(
         verdict: 结论文字（"支持" / "弱支持" / "不确定"）。
         dark_mode: 深色主题。
     """
-    from core.linguistic_fingerprint import SimilarityResult  # noqa: F811
-
     labels: List[str] = ["A vs 嫌疑作者 B"]
     means: List[float] = [sim_b.mean_similarity]
     stds: List[float] = [sim_b.std_similarity]

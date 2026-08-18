@@ -27,6 +27,7 @@ from collections import Counter
 from typing import Dict, List, Optional
 
 __all__ = [
+    "TOKEN_PATTERN",
     "tokenize",
     "build_freq_table",
     "zscore",
@@ -34,8 +35,10 @@ __all__ = [
     "hierarchical_cluster",
 ]
 
-# 仅保留字母单词（含带撇号的形式如 don't 拆分后取字母段）
-_TOKEN_RE = re.compile(r"[A-Za-z]+")
+# 分词正则：仅保留字母单词（含带撇号的形式如 don't 拆分后取字母段）。
+# slice_corpus 与相关测试共用此常量，保证口径一致。
+TOKEN_PATTERN = r"[A-Za-z]+"
+_TOKEN_RE = re.compile(TOKEN_PATTERN)
 
 
 def tokenize(text: str) -> List[str]:
@@ -50,7 +53,7 @@ def tokenize(text: str) -> List[str]:
 
 
 def build_freq_table(
-    texts: Dict[str, str], n: int = 100
+    texts: Dict[str, str], n: int = 100, tokenize_fn=None
 ) -> Dict[str, object]:
     """构建高频特征词相对频率表。
 
@@ -59,11 +62,15 @@ def build_freq_table(
 
     :param texts: ``{文本名: 原始文本}``
     :param n: 特征词数量（默认 100）
+    :param tokenize_fn: 可选分词器覆盖（默认 ``tokenize``）；
+                        仅供 v2.3.1 分词器对照实验使用，
+                        主管线保持默认不变
     :return: ``{"features": [特征词, ...],
                 "frequencies": {文本名: [相对频率, ...]}}``
     """
+    tok = tokenize_fn if tokenize_fn is not None else tokenize
     tokens_by_name: Dict[str, List[str]] = {
-        name: tokenize(text) for name, text in texts.items()
+        name: tok(text) for name, text in texts.items()
     }
 
     combined: Counter = Counter()

@@ -42,6 +42,8 @@ weights (see below).
 
 There is also a lightweight single-folder Delta tool, `run_delta.py`
 (no group structure; reads all `.txt` directly under `--input`).
+**Deprecated since v2.4.0** — its functionality is fully covered by
+`run_experiment.py`; use that instead.
 
 ### Input layout convention
 
@@ -158,6 +160,36 @@ Burrows' Delta pipeline (Delta matrix, Delta-based signal competition,
 dendrogram) never reads the fingerprint weight configuration, so those
 results are weight-independent by construction.
 
+### Step 4 (optional): paper data exports (v2.3.1)
+
+`export_paper_data.py` writes the paper's data artifacts in one pass from
+the raw corpus root (one subdirectory per group, full unsliced texts):
+
+```bash
+python experiments/export_paper_data.py --input corpus \
+    --data-out data --control-out results/tokenizer_control
+```
+
+- `data/mfw100.txt` — the 100 MFW wordlist. Merge convention: all full
+  unsliced texts of all groups are pooled, tokenized with the stylometry
+  tokenizer (`[A-Za-z]+`, lowercased), ranked by count descending with
+  alphabetical tie-break — identical to the feature selection inside
+  `build_freq_table`.
+- `data/delta_matrix_1k.csv` / `data/delta_matrix_2k.csv` — chunk-level
+  Delta matrices at the 1k/2k scales; byte-compatible with the existing
+  `delta_matrix_4k.csv` (UTF-8 BOM, empty corner cell, 6 decimals); the
+  100 MFW features are refit per scale on the chunks, as in
+  `run_experiment.py`.
+- `data/feature_scores.csv` — one row per chunk x scale (1k/2k/4k): the
+  eight per-dimension fingerprint scores (chunk vs own-group centroid,
+  the unweighted components of `weighted_cosine_similarity`) plus the
+  weighted total.
+- `results/tokenizer_control/<scale>/` — a full pipeline rerun with the
+  tokenizer changed to `[A-Za-z']+` (contractions kept), CSVs only
+  (delta_matrix / nn_predictions / signal_competition /
+  fingerprint_pairs); a control check, not part of the paper's main
+  tables. Use `--skip-control` to export only the `data/` artifacts.
+
 ## Reproducing a dual-translation experiment
 
 A typical use case is comparing two groups of parallel translations (e.g.
@@ -197,5 +229,75 @@ must be obtained by the user. To reproduce such an experiment:
 python run_tests.py
 ```
 
-No pytest required; the runner discovers all `test_*` functions under
-`tests/`.
+The runner is a thin pytest wrapper (pytest is declared in
+`requirements.txt`); it is equivalent to `python -m pytest tests/`.
+
+## Changelog note: v2.3.2 — Wilcoxon correctness fix
+
+- Fixed two deviations in
+  `core.linguistic_fingerprint.wilcoxon_signed_rank_test`: the average-rank
+  formula `(j+k+2)/2` → `(j+k+1)/2`, and the rank/sign mispairing caused by
+  `zip(ranks, indexed)` — signed ranks are now accumulated directly on the
+  sorted sequence (same standard definition as
+  `experiments/story_stats.wilcoxon_stats`). The normal survival function now
+  uses `math.erfc` (previously an Abramowitz & Stegun approximation with
+  ~1.5e-7 error).
+- Scope: on rerun, the GUI fingerprint page's `p_value_wilcoxon` and the
+  experiment pipeline's chunk-level `p_wilcoxon` (one of report.md's headline
+  statistics) are updated to the standard definition; the paper's
+  story-level tests go through `story_stats.wilcoxon_stats` and are
+  unchanged; all other outputs (Delta matrices, signal competition,
+  dendrogram, 1-NN, ...) are unaffected.
+- Both implementations now document that p is a normal approximation (no
+  continuity correction, no tie variance correction; with ties this differs
+  from scipy's tie-corrected values — see the test docstrings).
+- New `tests/test_wilcoxon.py`: hand-calc assertion (`[1,2,3,4,-1]` →
+  W=1.5), 200 random groups cross-checked against `story_stats`, and 200
+  against `scipy.stats.wilcoxon` (skipped when scipy is absent).
+
+## Changelog note: v2.4.0 — GUI hardening & engineering cleanup
+
+Guardrail: after all changes, the full three-scale pipeline (1k/2k/4k
+run_experiment) plus the 38-variant weight sensitivity was rerun on the real
+corpus and byte-diffed against the v2.3.2 baseline — all output directories
+byte-identical (delta / signal_competition / story_level_tests /
+weight_sensitivity CSVs, report.md, dendrogram).
+
+- **GUI fingerprint analysis 21–26x faster**: `analyze_fingerprint` now
+  batch-tokenizes all segments (`tokenize_many` + `extract_sentence_stats_many`),
+  reuses that tokenization for the global vocab, and runs spaCy with
+  `disable="all"` (tokenizer only — this path consumes just `Token.text`,
+  verified token-for-token identical to the full pipeline). Measured
+  (A ≈ 42k/70k/98k chars): 18.9s→0.74s / 20.0s→0.90s / 29.7s→1.41s.
+  A/B gate: every feature field and statistic identical, tolerance 0 (EN+ZH).
+- **Cancel button actually cancels** (`ui/async_runner.py`): cancelling bumps
+  the task generation so late results are dropped; new `on_cancel` callback
+  (fired exactly once) and `report_progress(done, total)` (determinate
+  per-chunk progress). Fingerprint and batch analysis check for cancellation
+  per chunk/file and stop within a second; the UI is immediately reusable.
+- **`ui/tabs.py` (2360 lines) split into the `ui/tabs/` package**: one module
+  per tab + shared `widgets.py`; `__init__.py` re-exports everything, so
+  `main_window.py` is untouched. Pure move.
+- Minor: `analyze_basic` no longer tokenizes every sentence to fill the
+  unread `Sentence.tokens`; VADER is now a thread-safe lazy singleton (scores
+  unchanged; SnowNLP instantiation measured at microseconds, kept per-call
+  with a comment); `run_delta.py` is deprecated (use `run_experiment.py`)
+  with a smoke test; `run_tests.py` is now a thin pytest wrapper.
+- Tests: 92 → 99 (6 new cancellation-semantics + 1 run_delta smoke).
+
+## Data & copyright
+
+- The code is MIT-licensed; `experiments/sample_corpus/` is **synthetic**
+  generated text and contains no real work.
+- Research corpora (e.g. dual translations of the same novels) are **not**
+  distributed with this repository: translation texts remain copyrighted by
+  their translators/publishers. Obtain them legally, use them for personal
+  research only, and never commit source texts to this or any public
+  repository (`corpus/` is gitignored by default).
+- The exports under `data/` and `results/` are **derived statistics**
+  (word lists, distance matrices, per-dimension scores) with no expressive
+  content from the source texts, and are safe to publish with the paper.
+
+## License
+
+MIT © 2026 Fragesius

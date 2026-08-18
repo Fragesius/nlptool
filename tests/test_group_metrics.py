@@ -19,6 +19,7 @@ from experiments.group_metrics import (  # noqa: E402
     signal_competition,
     work_stem,
 )
+from tests import _SAMPLE_DIR, has_matplotlib  # noqa: E402
 
 
 def test_work_stem_strips_chunk_suffix():
@@ -163,9 +164,6 @@ def test_signal_competition_translator_wins():
     assert res["p_value"] == 1.0  # 单对无法拒绝 H0
 
 
-_SAMPLE_DIR = Path(__file__).resolve().parent.parent / "experiments" / "sample_corpus"
-
-
 def _build_paired_groups(root: Path) -> Path:
     """用 sample_corpus 构造已知 A/B 分组，且两组含同词根篇目。
 
@@ -197,9 +195,7 @@ def _build_paired_groups(root: Path) -> Path:
 def test_run_experiment_writes_new_artifacts():
     """完整管线产出 nn_predictions.csv 与 signal_competition.csv，
     且 report.md 含两个新指标的章节与中文结论。"""
-    try:
-        import matplotlib  # noqa: F401
-    except ImportError:
+    if not has_matplotlib():
         print("    (skipped: matplotlib not installed)")
         return
 

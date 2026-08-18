@@ -33,6 +33,7 @@ def analyze_files(
     paths: List[str],
     lang: Optional[str] = None,
     progress_callback: Optional[Callable[[int, int, str], None]] = None,
+    cancel_check: Optional[Callable[[], None]] = None,
 ) -> List[BatchItem]:
     """批量分析文件列表。
 
@@ -40,6 +41,9 @@ def analyze_files(
         paths: 文件路径列表。
         lang: 语言代码（None 表示自动检测）。
         progress_callback: 进度回调，参数为 (current, total, filename)。
+        cancel_check: 可选取消检查回调，每个文件处理前调用一次；
+            回调抛出的异常（如 TaskCancelled）原样向上传播，
+            供 UI 协作式取消。
 
     Returns:
         BatchItem 列表。
@@ -51,6 +55,9 @@ def analyze_files(
         filename = os.path.basename(path)
         if progress_callback is not None:
             progress_callback(i, total, filename)
+        # 在 try 之外检查取消：被取消时不把取消异常记为单文件错误
+        if cancel_check is not None:
+            cancel_check()
 
         try:
             text = file_io.read_file(path)

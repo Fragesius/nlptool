@@ -17,8 +17,10 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-_SAMPLE_DIR = Path(__file__).resolve().parent.parent / "experiments" / "sample_corpus"
-_WORD_RE = re.compile(r"[A-Za-z]+")
+from core.stylometry import TOKEN_PATTERN  # noqa: E402
+from tests import _SAMPLE_DIR, has_matplotlib  # noqa: E402
+
+_WORD_RE = re.compile(TOKEN_PATTERN)
 
 N_GROUPS = 2
 SAMPLES_PER_GROUP = 15  # 共 30 个样本
@@ -55,17 +57,18 @@ def _build_30_sample_corpus(root: Path) -> Path:
 
 def test_feature_extraction_count_equals_sample_count():
     """30 个样本的分组实验中，extract_features 恰好被调用 30 次。"""
-    try:
-        import matplotlib  # noqa: F401
-    except ImportError:
+    if not has_matplotlib():
         print("    (skipped: matplotlib not installed)")
         return
 
     import experiments.run_experiment as rexp
+    import experiments.weight_sensitivity as ws
 
     n_samples = N_GROUPS * SAMPLES_PER_GROUP
     calls = []
-    original = rexp.extract_features
+    # run() 的特征提取走 weight_sensitivity.extract_corpus_features，
+    # 其内部调用该模块全局的 extract_features，包装它即可计数。
+    original = ws.extract_features
 
     def counting_extract_features(*args, **kwargs):
         calls.append(1)
@@ -76,11 +79,11 @@ def test_feature_extraction_count_equals_sample_count():
         inp = _build_30_sample_corpus(root)
         out = root / "out"
 
-        rexp.extract_features = counting_extract_features
+        ws.extract_features = counting_extract_features
         try:
             stats = rexp.run(inp, out, perm_n=200)
         finally:
-            rexp.extract_features = original
+            ws.extract_features = original
 
         assert stats["n_samples"] == n_samples
         assert len(calls) == n_samples, (

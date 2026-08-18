@@ -105,7 +105,7 @@ def wilcoxon_stats(differences: List[float]) -> Dict[str, float]:
     标准定义的平均秩与正态近似（与 scipy ``wilcoxon`` 的近似口径一致，
     可用小样本手算验证）；统计量 W = min(W+, W-)，效应量
     r = (W+ - W-) / T，T = n(n+1)/2（matched-pairs rank-biserial
-    correlation）。
+    correlation）。p 为正态近似（无连续性校正、无平局方差校正）。
 
     :param differences: 配对观测差值列表（零差值剔除，与既有实现一致）
     :return: ``{"n": 有效对数, "w_plus": W+, "w_minus": W-,
@@ -130,9 +130,9 @@ def wilcoxon_stats(differences: List[float]) -> Dict[str, float]:
         while k < n and indexed[k][0] == indexed[j][0]:
             k += 1
         # 位置 j..k-1（0-indexed）对应秩 j+1..k（1-indexed）。
-        # 注意：core.linguistic_fingerprint.wilcoxon_signed_rank_test
-        # 的 (j + k + 2) / 2 与 zip(ranks, indexed) 配对方式均与标准
-        # 定义有偏差；本函数按标准定义实现，可与 scipy / 手算对照。
+        # core.linguistic_fingerprint.wilcoxon_signed_rank_test 自 v2.3.2
+        # 起已修复为同一标准定义（此前平均秩与秩-符号配对有偏差）；
+        # 本函数按标准定义实现，可与 scipy / 手算对照。
         avg_rank = (j + k + 1) / 2.0
         for m in range(j, k):
             if indexed[m][1]:

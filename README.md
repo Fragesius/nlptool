@@ -54,6 +54,9 @@ python -m spacy download en_core_web_sm
 
 # 3. 运行
 python main.py
+
+# 4. 运行测试（委托 pytest，等价于 python -m pytest tests/）
+python run_tests.py
 ```
 
 > 未安装的库会自动降级，核心功能始终可用。
@@ -79,7 +82,7 @@ nlptool/
 │   ├── plots.py                    # matplotlib 图表
 │   └── dendrogram.py               # 层次聚类树状图（300 dpi PNG）
 ├── experiments/
-│   ├── run_delta.py                # Burrows' Delta 命令行入口
+│   ├── run_delta.py                # Burrows' Delta 命令行入口（已废弃，请用 run_experiment.py）
 │   └── sample_corpus/              # 4 篇合成冒烟语料（含生成脚本）
 ├── tests/
 │   ├── test_analyzer.py            # 核心分析测试
@@ -113,9 +116,84 @@ nlptool/
 
 MIT © 2026 Fragesius
 
+## ⚖️ 数据与版权
+
+- 仓库代码采用 MIT 许可；`experiments/sample_corpus/` 为程序生成的**合成语料**，不含任何真实作品文本。
+- 研究语料（如鲁迅小说的双译本）**不随仓库分发**：译本受译者/出版方版权保护，请自行合法获取并仅作个人研究用途，切勿将原文提交进本仓库或任何公开仓库（`.gitignore` 已默认排除 `corpus/`）。
+- `data/` 与 `results/` 下的导出物为**派生统计数据**（词表、距离矩阵、维度得分），不含原文表达性内容，可随论文公开。
+
 ---
 
 ## 📦 Changelog
+
+### v2.4.0 — GUI 加固与工程整理（数值零变化）
+
+护栏验证：全部改动完成后，在真实语料上重跑三尺度全管线（1k/2k/4k
+run_experiment）+ 38 变体权重敏感性，与 v2.3.2 基线逐字节 diff 全绿：
+
+```text
+out_1000: byte-identical   # delta/signal_competition/story_level_tests 等 + report.md + 树状图
+out_2000: byte-identical
+out_4000: byte-identical
+ws: byte-identical         # weight_sensitivity.csv（38 变体 × 3 尺度，114 行）
+```
+
+- **GUI 指纹分析提速 21–26x**（`analyze_fingerprint` 批处理化）：分段后一次性
+  `tokenize_many` + `extract_sentence_stats_many`，词表构建复用批量分词；
+  `tokenize_many` 新增 `disable="all"` 只跑分词器（该路径只消费 `Token.text`，
+  已验证与完整管线逐 token 相等）。实测（A≈4.2万/7万/9.8万字符）：
+  18.9s→0.74s / 20.0s→0.90s / 29.7s→1.41s。A/B 门禁：EN+ZH 全部片段的九维
+  特征与全部统计量逐元素 `==`（容差 0）。
+- **修复"假取消"**（`ui/async_runner.py`）：取消时 bump 任务世代，迟到的旧
+  结果一律丢弃；新增 `on_cancel` 回调（恰好一次）与 `report_progress(done,
+  total)`（进度条切 determinate，按 chunk 汇报）；指纹分析与批量分析已在
+  每个 chunk/文件处检查取消，取消后 1 秒内停止、界面立即可发起新任务。
+- **`ui/tabs.py`（2360 行）拆为 `ui/tabs/` 包**：8 个 Tab 类各成模块 +
+  `widgets.py` 共享控件，`__init__.py` 统一导出，`main_window.py` 零改动，
+  纯移动。
+- 次要：`analyze_basic` 不再逐句分词填无人读取的 `Sentence.tokens`；VADER
+  改模块级惰性单例（线程安全，得分不变；SnowNLP 实例化实测微秒级，保持
+  逐句新建并加注释说明）；`run_delta.py` 标记 deprecated（请用
+  `run_experiment.py`）并补冒烟测试；`run_tests.py` 改为 pytest 薄壳。
+- 测试：92 → 99（新增取消语义 6 项 + run_delta 冒烟 1 项）。
+
+### v2.3.2 — 正确性修复：Wilcoxon 符号秩检验
+
+- 修复 `core.linguistic_fingerprint.wilcoxon_signed_rank_test` 的两处偏差：
+  平均秩公式 `(j+k+2)/2` → `(j+k+1)/2`；废弃 `zip(ranks, indexed)` 的
+  秩-符号错配，改为在排序后序列上直接累加带符号秩（与
+  `experiments/story_stats.wilcoxon_stats` 同一标准定义）。正态生存函数
+  改用 `math.erfc` 精确计算（旧版 Abramowitz & Stegun 7.1.26 近似，
+  误差 ~1.5e-7）。
+- 影响范围：GUI 语言指纹页的 `p_value_wilcoxon` 与实验管线的 chunk 级
+  `p_wilcoxon`（report.md 头条统计之一）在重跑时按标准定义更新；论文
+  story_level_tests 走 `story_stats.wilcoxon_stats`，数值不变；其余输出
+  （Delta 矩阵、信号竞争、树状图、1-NN 等）不受影响。
+- 两个 Wilcoxon 实现均注明：p 为正态近似（无连续性校正、无平局方差校正；
+  存在平局时与 scipy 的平局校正口径不同，差异已在测试文档中说明）。
+- 新增 `tests/test_wilcoxon.py`：手算断言（`[1,2,3,4,-1]` → W=1.5）、
+  200 组随机差值与 `story_stats` 对拍、200 组与 `scipy.stats.wilcoxon`
+  对拍（无 scipy 时自动跳过）。
+
+### v2.3.1 — 数据导出小版本（不动核心算法）
+
+📤 **论文数据一键导出（`experiments/export_paper_data.py`，新增）**
+
+```bash
+python experiments/export_paper_data.py --input corpus \
+    --data-out data --control-out results/tokenizer_control
+```
+
+- `data/mfw100.txt`：100 MFW 词表。**合并口径**：全部组的未切片原文（32 篇）合并池化，用 stylometry 分词器（`[A-Za-z]+`、小写化）计数，按频次降序、同频按字典序取前 100，一词一行——与 `build_freq_table` 内部特征选择完全一致
+- `data/delta_matrix_1k.csv` / `delta_matrix_2k.csv`：1k/2k 尺度 chunk 级 Delta 矩阵；格式与既有 `delta_matrix_4k.csv` 逐字节兼容（UTF-8 BOM、空角单元格、6 位小数）；各尺度在切片上重新拟合 100 MFW（同 `run_experiment.py` 惯例）
+- `data/feature_scores.csv`：每 chunk × 每尺度（1k/2k/4k）的指纹八维分量得分（chunk 对本组质心的各维相似度，即加权余弦加权前的八个分量）+ 默认权重加权和
+- `results/tokenizer_control/<尺度>/`：分词器对照跑（`[A-Za-z']+` 保留缩略词），三尺度全管线重跑，只产 CSV（delta_matrix / nn_predictions / signal_competition / fingerprint_pairs），不进论文主表
+
+🔧 **核心小幅重构（行为不变）**
+- `core/linguistic_fingerprint.py` 拆出 `dimension_scores()`（八维分量），`weighted_cosine_similarity()` 改为在其上加权，默认路径逐字节不变
+- `core/stylometry.py` 的 `build_freq_table` 新增可选 `tokenize_fn` 参数（默认不变），供对照实验使用
+
+🧪 新增 `tests/test_export_paper_data.py`（8 个测试）
 
 ### v2.3.0 — 权重敏感性分析：证明结论不依赖指纹权重
 

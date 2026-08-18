@@ -17,14 +17,13 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+from tests import has_matplotlib  # noqa: E402
 from tests.test_group_metrics import _build_paired_groups  # noqa: E402
 
 
 def test_run_progress_callback_stage_totals():
     """12 样本（2 组 × 2 篇 × 3 切片）下各阶段进度总量精确吻合。"""
-    try:
-        import matplotlib  # noqa: F401
-    except ImportError:
+    if not has_matplotlib():
         print("    (skipped: matplotlib not installed)")
         return
 
@@ -94,9 +93,7 @@ def test_slice_corpus_progress_callback():
 
 def test_run_without_callback_unchanged():
     """不传回调时 run() 正常完成（命令行路径行为不变）。"""
-    try:
-        import matplotlib  # noqa: F401
-    except ImportError:
+    if not has_matplotlib():
         print("    (skipped: matplotlib not installed)")
         return
 
