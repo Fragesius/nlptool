@@ -117,6 +117,20 @@ MIT © 2026 Fragesius
 
 ## 📦 Changelog
 
+### v2.3.0 — 权重敏感性分析：证明结论不依赖指纹权重
+
+📊 **权重敏感性分析（`experiments/weight_sensitivity.py`，新增）**
+- 在 `default` / `uniform` / `lodo` / `single` / `random` 五种权重方案下重跑指纹类组级指标：组内/组间平均距离、Cohen's d、信号竞争检验与 1-NN 留一法准确率（含多数类基线），输出长表 `weight_sensitivity.csv`（variant × scale）
+- `--scale NAME=DIR` 可多尺度重复指定；`--weights` 指定方案；`--report` 把「Weight sensitivity」小结追加进已有 `report.md`（纯追加，不改动原文）
+- `random` 方案对每维权重在 [0.5w, 1.5w] 内均匀扰动再归一化，20 个种子自 20260818 起，各自独立随机流，不污染全局随机状态
+
+🔧 **加权余弦相似度支持权重覆盖（`core/linguistic_fingerprint.py`）**
+- `weighted_cosine_similarity()` 新增可选 `weights` 参数（缺省维度按 0 计）；为 None 时走模块级 `FEATURE_WEIGHTS`，结果与旧版逐字节一致；求和顺序固定为 `FEATURE_WEIGHTS` 键序，与传入 dict 迭代顺序无关
+
+🧪 **测试与文档**
+- 新增 `tests/test_weight_sensitivity.py`
+- `README_EN.md` 新增「Step 3 (optional): weight sensitivity analysis」章节
+
 ### v2.2.0 — 统计与图：多尺度切片、篇目级统计与自助法稳健性
 
 📊 **篇目级统计（`experiments/story_stats.py`，新增）**

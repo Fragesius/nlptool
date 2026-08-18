@@ -831,7 +831,11 @@ def _scalar_similarity(a: float, b: float) -> float:
     return max(0.0, 1.0 - diff)
 
 
-def weighted_cosine_similarity(fv_a: FeatureVector, fv_b: FeatureVector) -> float:
+def weighted_cosine_similarity(
+    fv_a: FeatureVector,
+    fv_b: FeatureVector,
+    weights: Optional[Dict[str, float]] = None,
+) -> float:
     """分维度加权余弦相似度。
 
     对每个特征维度分别计算余弦相似度（标量用 _scalar_similarity），
@@ -840,6 +844,11 @@ def weighted_cosine_similarity(fv_a: FeatureVector, fv_b: FeatureVector) -> floa
     这解决了旧版"拼接向量"的核心缺陷：字 4-gram 占 100 维，
     虚词频率占 50 维，拼接后 4-gram 天然主导结果。
     现在每个维度的贡献由权重决定，与维度大小无关。
+
+    :param weights: 可选的分维度权重覆盖（键为维度名，缺省维度按 0 计）。
+                    为 None 时使用模块级 FEATURE_WEIGHTS，结果与旧版
+                    逐字节一致；求和顺序始终按 FEATURE_WEIGHTS 的键序，
+                    与传入 dict 的迭代顺序无关。
     """
     scores: Dict[str, float] = {}
 
@@ -906,10 +915,13 @@ def weighted_cosine_similarity(fv_a: FeatureVector, fv_b: FeatureVector) -> floa
     # 8. Hapax 比例
     scores["hapax_ratio"] = _scalar_similarity(fv_a.hapax_ratio, fv_b.hapax_ratio)
 
-    # 加权平均
+    # 加权平均（权重可覆盖；求和顺序固定为 FEATURE_WEIGHTS 键序，
+    # 保证默认路径与旧版逐字节一致）
+    if weights is None:
+        weights = FEATURE_WEIGHTS
     total = 0.0
-    for key, weight in FEATURE_WEIGHTS.items():
-        total += weight * scores.get(key, 0.0)
+    for key in FEATURE_WEIGHTS:
+        total += weights.get(key, 0.0) * scores.get(key, 0.0)
 
     return total
 

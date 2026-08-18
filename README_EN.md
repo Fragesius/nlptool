@@ -36,6 +36,10 @@ The pipeline lives under `experiments/` and has two stages:
 2. **experiment** (`run_experiment.py`) — run the grouped stylometry
    experiment over the chunks and write all result artifacts.
 
+An optional third tool, `weight_sensitivity.py`, reruns the
+fingerprint-based group metrics under alternative composite-fingerprint
+weights (see below).
+
 There is also a lightweight single-folder Delta tool, `run_delta.py`
 (no group structure; reads all `.txt` directly under `--input`).
 
@@ -107,6 +111,47 @@ python experiments/run_experiment.py \
 | `nn_predictions.csv` | 1-NN leave-one-out classification on the Delta matrix |
 | `signal_competition.csv` | per-work original-vs-group signal competition results |
 | `report.md` | Markdown summary of all statistics, tests and conclusions |
+
+### Step 3 (optional): weight sensitivity analysis
+
+The composite fingerprint weights (function words 0.30, punctuation 0.15,
+word bigrams 0.15, word length 0.10, sentence length 0.10, TTR 0.10,
+char 4-grams 0.05, hapax ratio 0.05) are heuristic. To show that the
+conclusions do not depend on them, `weight_sensitivity.py` reruns the
+fingerprint-based group metrics — within/between-group mean distance,
+Cohen's d, the signal competition test and 1-NN leave-one-out accuracy —
+under alternative weighting schemes, at one or more chunk scales:
+
+```bash
+python experiments/weight_sensitivity.py \
+    --scale 1k=corpus_sliced_1000 \
+    --scale 2k=corpus_sliced_2000 \
+    --scale 4k=corpus_sliced_4000 \
+    --weights lodo \
+    --out sensitivity_out \
+    --report experiment_output_2000/report.md
+```
+
+- `--scale NAME=DIR`: one grouped input directory per scale (repeatable;
+  each `DIR` follows the same input layout convention as
+  `run_experiment.py`).
+- `--weights {default,uniform,lodo,single,random}`: `default` keeps the
+  existing weights (identical to running without the switch); `uniform`
+  weights all eight dimensions 1/8; `lodo` zeroes one dimension at a time
+  and renormalizes the rest in their original proportions (8 variants);
+  `single` uses one dimension at a time (8 variants); `random` perturbs
+  each weight uniformly within [0.5w, 1.5w] and renormalizes (20 seeds
+  starting at 20260818, each on its own RNG stream).
+- `--report`: appends a "Weight sensitivity" section (summary table plus
+  a one-sentence conclusion) to an existing `report.md`; the append is
+  pure — no existing content is modified.
+
+Output: `weight_sensitivity.csv`, a long table with one row per
+variant x scale and columns `variant, scale, within, between, d,
+competition_wins, knn_acc, knn_baseline`. Note that the headline
+Burrows' Delta pipeline (Delta matrix, Delta-based signal competition,
+dendrogram) never reads the fingerprint weight configuration, so those
+results are weight-independent by construction.
 
 ## Reproducing a dual-translation experiment
 
