@@ -25,6 +25,13 @@ Pipeline:
        permutation test (default 10000 iterations) and Cohen's d.
     d) A Markdown ``report.md`` summarizing all of the above, plus
        ``fingerprint_pairs.csv`` with per-pair similarity details.
+    e) (v2.2.0) Story-level statistics and robustness checks
+       (``experiments.story_stats``): story-level Wilcoxon signed-rank
+       test (``story_level_tests.csv``), story-level bootstrap CI for
+       Cohen's d (``d_bootstrap_ci.csv``) and the equal-chunk robustness
+       check (``equal_chunk_robustness.csv``); appended as new sections
+       at the end of ``report.md`` — all pre-existing report content and
+       CSV artifacts stay byte-identical.
 """
 
 from __future__ import annotations
@@ -60,6 +67,12 @@ from viz.dendrogram import plot_dendrogram  # noqa: E402
 from experiments.group_metrics import (  # noqa: E402
     nearest_neighbor_loo,
     signal_competition,
+)
+from experiments.story_stats import (  # noqa: E402
+    DEFAULT_BOOT_SEED,
+    bootstrap_d_ci,
+    equal_chunk_robustness,
+    story_wilcoxon,
 )
 
 
@@ -250,6 +263,9 @@ def run(
     lang: str = "en",
     report_lang: str = "zh",
     progress_callback=None,
+    scale: str = "",
+    boot_n: int = 10000,
+    boot_seed: int = DEFAULT_BOOT_SEED,
 ) -> Dict[str, object]:
     """Run the full grouped experiment and write all artifacts.
 
@@ -264,6 +280,11 @@ def run(
     :param progress_callback: optional ``callback(current, total,
         stage_name)`` invoked at each pipeline step; omitting it keeps
         the command-line behavior unchanged
+    :param scale: chunk-scale label (e.g. "1k"/"2k"/"4k") recorded in the
+        v2.2.0 story-level CSV artifacts; does not affect computation
+    :param boot_n: story-level bootstrap iterations for the Cohen's d CI
+    :param boot_seed: independent RNG seed for the bootstrap (never
+        touches the permutation test's random stream)
     :return: dict of key statistics (for testing / programmatic use)
     """
     def _progress(current: int, total: int, stage: str) -> None:
@@ -466,6 +487,61 @@ def run(
           f"permutation p={p_perm:.4f}, Cohen's d={d_val:.3f}")
 
     # ------------------------------------------------------------------
+    # (e) v2.2.0: 故事级统计与稳健性检验（只新增产物，不改既有输出）
+    # ------------------------------------------------------------------
+    _progress(0, 1, "故事级统计")
+    # 任务一：故事级 Wilcoxon
+    sw = story_wilcoxon(labels, group_of, sim_pair)
+    sw_stats = sw["stats"]  # type: ignore[assignment]
+    story_csv = out_dir / "story_level_tests.csv"
+    with story_csv.open("w", newline="", encoding="utf-8-sig") as f:
+        writer = csv.writer(f)
+        writer.writerow(["scale", "n_stories", "mean_diff",
+                         "wilcoxon_w", "p_value", "rank_biserial_r"])
+        writer.writerow([scale, sw_stats["n"], f"{sw['mean_diff']:.6f}",
+                         f"{sw_stats['W']:.1f}", f"{sw_stats['p']:.6f}",
+                         f"{sw_stats['r']:.6f}"])
+    print(f"Story-level Wilcoxon: n={sw_stats['n']}, "
+          f"W={sw_stats['W']:.1f}, p={sw_stats['p']:.4f}, "
+          f"r={sw_stats['r']:.3f}; written: {story_csv}")
+
+    # 任务二：Cohen's d 故事级 bootstrap 置信区间
+    boot = bootstrap_d_ci(labels, group_of, sim_pair,
+                          n_iter=boot_n, seed=boot_seed)
+    boot_csv = out_dir / "d_bootstrap_ci.csv"
+    with boot_csv.open("w", newline="", encoding="utf-8-sig") as f:
+        writer = csv.writer(f)
+        writer.writerow(["scale", "n_stories", "n_iter",
+                         "d_observed", "ci_low", "ci_high"])
+        writer.writerow([scale, boot["n_stories"], boot["n_iter"],
+                         f"{boot['d_observed']:.6f}",
+                         f"{boot['ci_low']:.6f}",
+                         f"{boot['ci_high']:.6f}"])
+    print(f"Story bootstrap d CI ({boot_n} iters, seed {boot_seed}): "
+          f"d={boot['d_observed']:.3f}, "
+          f"95% CI [{boot['ci_low']:.3f}, {boot['ci_high']:.3f}]; "
+          f"written: {boot_csv}")
+
+    # 任务三：equal-chunk 稳健性检验
+    eq = equal_chunk_robustness(dm_labels, matrix, group_of, sim_pair)
+    eq_csv = out_dir / "equal_chunk_robustness.csv"
+    with eq_csv.open("w", newline="", encoding="utf-8-sig") as f:
+        writer = csv.writer(f)
+        writer.writerow(["scale", "n_stories", "kept_chunks",
+                         "wins_original", "wins_translator", "ties",
+                         "sign_test_p", "cohens_d"])
+        writer.writerow([scale, eq["n_stories"], len(eq["kept_labels"]),
+                         eq["wins_original"], eq["wins_translator"],
+                         eq["ties"], f"{eq['p_value']:.6f}",
+                         f"{eq['cohens_d']:.6f}"])
+    print(f"Equal-chunk robustness: {eq['n_stories']} stories, "
+          f"{len(eq['kept_labels'])} chunks kept; original "
+          f"{eq['wins_original']} vs translator {eq['wins_translator']} "
+          f"(p={eq['p_value']:.4f}), d={eq['cohens_d']:.3f}; "
+          f"written: {eq_csv}")
+    _progress(1, 1, "故事级统计")
+
+    # ------------------------------------------------------------------
     # (d) Markdown report
     # ------------------------------------------------------------------
     # Both tests must pass: taking the max p-value is the conservative
@@ -596,6 +672,36 @@ def run(
         "",
         conclusion,
         "",
+        # ── v2.2.0 追加章节（既有内容逐字节不变，只在末尾追加）──
+        "## Story-Level Wilcoxon Test",
+        "",
+        f"- Paired stories: **{sw_stats['n']}**; "
+        f"mean diff_s: **{sw['mean_diff']:.4f}**",
+        f"- Wilcoxon W = **{sw_stats['W']:.1f}**, "
+        f"p = **{sw_stats['p']:.4f}**, "
+        f"rank-biserial r = **{sw_stats['r']:.3f}**",
+        "- Details: `story_level_tests.csv`",
+        "",
+        "## Story-Level Bootstrap CI for Cohen's d",
+        "",
+        f"- Bootstrap: {boot_n} iterations, story-level resampling "
+        f"with replacement (independent seed {boot_seed})",
+        f"- Observed Cohen's d = **{boot['d_observed']:.3f}**; "
+        f"95% percentile CI = **[{boot['ci_low']:.3f}, "
+        f"{boot['ci_high']:.3f}]**",
+        "- Details: `d_bootstrap_ci.csv`",
+        "",
+        "## Equal-Chunk Robustness",
+        "",
+        f"- Balanced corpus: {eq['n_stories']} stories, "
+        f"{len(eq['kept_labels'])} chunks kept "
+        f"(each story × translator cell downsampled to the cell minimum)",
+        f"- Signal competition: original **{eq['wins_original']}** wins, "
+        f"translator **{eq['wins_translator']}** wins "
+        f"(ties {eq['ties']}); sign test p = **{eq['p_value']:.4f}**",
+        f"- Cohen's d on balanced corpus = **{eq['cohens_d']:.3f}**",
+        "- Details: `equal_chunk_robustness.csv`",
+        "",
     ]
     report_path = out_dir / "report.md"
     report_path.write_text("\n".join(report_lines), encoding="utf-8")
@@ -629,6 +735,21 @@ def run(
         "significant": significant,
         # report.md 结论段的中文模板文字，供 GUI 等调用方直接展示
         "conclusion": conclusion_zh,
+        # v2.2.0 新增：故事级统计与稳健性检验
+        "story_wilcoxon_n": sw_stats["n"],
+        "story_wilcoxon_w": sw_stats["W"],
+        "story_wilcoxon_p": sw_stats["p"],
+        "story_wilcoxon_r": sw_stats["r"],
+        "story_mean_diff": sw["mean_diff"],
+        "d_bootstrap_observed": boot["d_observed"],
+        "d_bootstrap_ci_low": boot["ci_low"],
+        "d_bootstrap_ci_high": boot["ci_high"],
+        "eq_n_stories": eq["n_stories"],
+        "eq_kept_chunks": len(eq["kept_labels"]),
+        "eq_wins_original": eq["wins_original"],
+        "eq_wins_translator": eq["wins_translator"],
+        "eq_p_value": eq["p_value"],
+        "eq_cohens_d": eq["cohens_d"],
     }
 
 
@@ -650,6 +771,15 @@ def main() -> None:
     parser.add_argument("--report-lang", default="zh", choices=["zh", "en"],
                         help="template language of report.md (default zh; "
                              "numbers and tables are identical either way)")
+    parser.add_argument("--scale", default="",
+                        help="chunk-scale label (e.g. 1k/2k/4k) recorded in "
+                             "the v2.2.0 story-level CSV artifacts")
+    parser.add_argument("--boot-n", type=int, default=10000,
+                        help="story-level bootstrap iterations for the "
+                             "Cohen's d CI (default 10000)")
+    parser.add_argument("--boot-seed", type=int, default=DEFAULT_BOOT_SEED,
+                        help=f"independent bootstrap RNG seed "
+                             f"(default {DEFAULT_BOOT_SEED})")
     args = parser.parse_args()
 
     input_dir = Path(args.input)
@@ -660,7 +790,8 @@ def main() -> None:
 
     try:
         run(input_dir, Path(args.out), top_n=args.top_n,
-            perm_n=args.perm_n, lang=args.lang, report_lang=args.report_lang)
+            perm_n=args.perm_n, lang=args.lang, report_lang=args.report_lang,
+            scale=args.scale, boot_n=args.boot_n, boot_seed=args.boot_seed)
     except ValueError as e:
         print(f"error: {e}", file=sys.stderr)
         sys.exit(1)
