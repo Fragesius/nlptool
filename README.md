@@ -187,6 +187,7 @@ python experiments/export_paper_data.py --input corpus \
 - `data/mfw100.txt`：100 MFW 词表。**合并口径**：全部组的未切片原文（32 篇）合并池化，用 stylometry 分词器（`[A-Za-z]+`、小写化）计数，按频次降序、同频按字典序取前 100，一词一行——与 `build_freq_table` 内部特征选择完全一致
 - `data/delta_matrix_1k.csv` / `delta_matrix_2k.csv`：1k/2k 尺度 chunk 级 Delta 矩阵；格式与既有 `delta_matrix_4k.csv` 逐字节兼容（UTF-8 BOM、空角单元格、6 位小数）；各尺度在切片上重新拟合 100 MFW（同 `run_experiment.py` 惯例）
 - `data/feature_scores.csv`：每 chunk × 每尺度（1k/2k/4k）的指纹八维分量得分（chunk 对本组质心的各维相似度，即加权余弦加权前的八个分量）+ 默认权重加权和
+- `data/mfw_sensitivity.csv`：MFW 数量敏感性扫描（top-n 取 50/100/200/500 × 三尺度，12 行）：aggregate Cohen's d 与信号竞争胜场；d 随尺度单调、对 n 不变（d 来自指纹路径，与 MFW 词表无关），胜场合计 47/48，头条结论不翻转
 - `results/tokenizer_control/<尺度>/`：分词器对照跑（`[A-Za-z']+` 保留缩略词），三尺度全管线重跑，只产 CSV（delta_matrix / nn_predictions / signal_competition / fingerprint_pairs），不进论文主表
 
 🔧 **核心小幅重构（行为不变）**

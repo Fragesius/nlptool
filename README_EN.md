@@ -184,6 +184,11 @@ python experiments/export_paper_data.py --input corpus \
   eight per-dimension fingerprint scores (chunk vs own-group centroid,
   the unweighted components of `weighted_cosine_similarity`) plus the
   weighted total.
+- `data/mfw_sensitivity.csv` — MFW-count sensitivity scan (top-n in
+  {50, 100, 200, 500} x three scales, 12 rows): aggregate Cohen's d and
+  signal-competition wins. d is monotone in scale and invariant to n
+  (d comes from the fingerprint path, which does not use the MFW table);
+  wins total 47/48 — the headline conclusion is unchanged.
 - `results/tokenizer_control/<scale>/` — a full pipeline rerun with the
   tokenizer changed to `[A-Za-z']+` (contractions kept), CSVs only
   (delta_matrix / nn_predictions / signal_competition /
