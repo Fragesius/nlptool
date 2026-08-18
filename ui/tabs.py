@@ -1582,12 +1582,24 @@ class ExperimentTab(ctk.CTkFrame):
     不复制任何实验逻辑。
     """
 
+    # 权重敏感性方案：（显示文字, experiments.weight_sensitivity 的方案键）
+    _SENS_SCHEMES = [
+        ("全部方案（all，38 变体）", "all"),
+        ("随机扰动（random，20 种子）", "random"),
+        ("现有权重（default）", "default"),
+        ("八维等权（uniform）", "uniform"),
+        ("逐维留一（lodo，8 变体）", "lodo"),
+        ("单维独立（single，8 变体）", "single"),
+    ]
+
     def __init__(self, master, app):
         super().__init__(master, fg_color="transparent")
         self.app = app
         self._runner = TaskRunner(self)
         self._out_dir: Optional[str] = None
         self._report_text = ""
+        self._sens_out_dir: Optional[str] = None
+        self._sens_report_text = ""
 
         self.grid_columnconfigure(0, weight=1)
         self.grid_columnconfigure(1, weight=0, minsize=420)
@@ -1693,6 +1705,116 @@ class ExperimentTab(ctk.CTkFrame):
         self.progress_bar.set(0)
         self._progress_queue: "queue.Queue[tuple]" = queue.Queue()
 
+        # ══ 权重敏感性（v2.3.0，论文附录 B）══
+        sens_card = Card(right, "⚖ 权重敏感性")
+        sens_card.pack(fill="x", padx=6, pady=4)
+
+        hint_label(
+            sens_card,
+            "检验结论是否依赖复合指纹的启发式权重：按 权重变体 × 尺度 重算指纹指标",
+            pady=(2, 4),
+        )
+
+        # ── 语料目录（原始语料，自动切片）──
+        crow = ctk.CTkFrame(sens_card, fg_color="transparent")
+        crow.pack(fill="x", padx=12, pady=2)
+        ctk.CTkLabel(crow, text="语料目录：",
+                     font=s.font("body")).pack(side="left")
+        self.sens_input_var = tk.StringVar()
+        ctk.CTkEntry(crow, textvariable=self.sens_input_var,
+                     font=s.font("body")).pack(
+            side="left", fill="x", expand=True, padx=(4, 4))
+        flat_btn(crow, text="📂 浏览…", width=90,
+                 command=self._pick_sens_input).pack(side="left")
+
+        hint_label(
+            sens_card,
+            "原始语料按 一级子文件夹=组别（译者） 组织；按勾选规模自动切片后分析",
+            pady=(2, 4),
+        )
+
+        # ── 切片规模：1k/2k/4k 勾选 + 自定义词数 ──
+        scale_row = ctk.CTkFrame(sens_card, fg_color="transparent")
+        scale_row.pack(fill="x", padx=12, pady=2)
+        ctk.CTkLabel(scale_row, text="切片规模：",
+                     font=s.font("body")).pack(side="left")
+        self.sens_scale_checks = {}
+        for label, size in (("1k", 1000), ("2k", 2000), ("4k", 4000)):
+            var = tk.BooleanVar(value=True)
+            self.sens_scale_checks[size] = var
+            ctk.CTkCheckBox(scale_row, text=label, variable=var,
+                            font=s.font("body")).pack(side="left",
+                                                      padx=(4, 4))
+
+        # ── 自定义规模（单独一行，窄栏不被挤出）──
+        custom_row = ctk.CTkFrame(sens_card, fg_color="transparent")
+        custom_row.pack(fill="x", padx=12, pady=2)
+        ctk.CTkLabel(custom_row, text="自定义规模：",
+                     font=s.font("body")).pack(side="left")
+        self.sens_custom_var = tk.StringVar()
+        ctk.CTkEntry(custom_row, textvariable=self.sens_custom_var,
+                     width=90, font=s.font("body")).pack(side="left",
+                                                         padx=(4, 2))
+        ctk.CTkLabel(custom_row, text="词（留空则不用）",
+                     font=s.font("body")).pack(side="left", padx=(2, 0))
+
+        # ── 权重方案 ──
+        scheme_row = ctk.CTkFrame(sens_card, fg_color="transparent")
+        scheme_row.pack(fill="x", padx=12, pady=2)
+        ctk.CTkLabel(scheme_row, text="权重方案：",
+                     font=s.font("body")).pack(side="left")
+        self.sens_scheme_var = tk.StringVar(value=self._SENS_SCHEMES[0][0])
+        ctk.CTkOptionMenu(
+            scheme_row, variable=self.sens_scheme_var,
+            values=[label for label, _ in self._SENS_SCHEMES],
+            width=220, font=s.font("body"),
+        ).pack(side="left", padx=(4, 0))
+
+        # ── 输出目录 ──
+        orow = ctk.CTkFrame(sens_card, fg_color="transparent")
+        orow.pack(fill="x", padx=12, pady=2)
+        ctk.CTkLabel(orow, text="输出目录：", font=s.font("body")).pack(side="left")
+        self.sens_output_var = tk.StringVar()
+        ctk.CTkEntry(orow, textvariable=self.sens_output_var,
+                     font=s.font("body")).pack(
+            side="left", fill="x", expand=True, padx=(4, 4))
+        flat_btn(orow, text="📂 浏览…", width=90,
+                 command=self._pick_sens_output).pack(side="left")
+
+        hint_label(
+            sens_card,
+            "留空则默认为 语料目录/weight_sensitivity（切片存于其下 sliced_* 子目录）",
+            pady=(2, 4),
+        )
+
+        # ── 追加到报告（可选）──
+        rrow = ctk.CTkFrame(sens_card, fg_color="transparent")
+        rrow.pack(fill="x", padx=12, pady=2)
+        ctk.CTkLabel(rrow, text="追加到报告：",
+                     font=s.font("body")).pack(side="left")
+        self.sens_report_var = tk.StringVar()
+        ctk.CTkEntry(rrow, textvariable=self.sens_report_var,
+                     font=s.font("body")).pack(
+            side="left", fill="x", expand=True, padx=(4, 4))
+        flat_btn(rrow, text="📂 浏览…", width=90,
+                 command=self._pick_sens_report).pack(side="left")
+
+        hint_label(
+            sens_card,
+            "可选：在既有 report.md 末尾纯追加一节「Weight sensitivity」，不改动既有内容",
+            pady=(2, 4),
+        )
+
+        srun = ctk.CTkFrame(sens_card, fg_color="transparent")
+        srun.pack(fill="x", padx=12, pady=(4, 10))
+        self.sens_run_btn = accent_btn(
+            srun, text="⚖ 运行敏感性分析", command=self.run_sensitivity)
+        self.sens_run_btn.pack(side="left")
+        self.sens_open_btn = flat_btn(
+            srun, text="📂 打开输出文件夹",
+            command=self._open_sens_output, state="disabled")
+        self.sens_open_btn.pack(side="left", padx=(8, 0))
+
         # ══ 结果展示：摘要网格 ══
         result_card = Card(left, "📋 实验结果摘要")
         result_card.pack(fill="both", expand=True)
@@ -1733,17 +1855,60 @@ class ExperimentTab(ctk.CTkFrame):
         add_copy_button(result_card, lambda: self._report_text,
                         label="📋 复制摘要")
 
+        # ══ 权重敏感性结果 ══
+        sens_result_card = Card(left, "⚖ 权重敏感性结果")
+        sens_result_card.pack(fill="both", expand=True, pady=(8, 0))
+
+        self.sens_metrics_grid = ctk.CTkFrame(
+            sens_result_card, fg_color="transparent")
+        self.sens_metrics_grid.pack(fill="x", padx=12, pady=(6, 4))
+        self.sens_metrics_grid.grid_columnconfigure(1, weight=1)
+
+        self._sens_placeholder = ctk.CTkLabel(
+            self.sens_metrics_grid,
+            text=(
+                "尚未运行权重敏感性分析。\n\n"
+                "在右侧选择原始语料目录、勾选切片规模后点击「⚖ 运行敏感性分析」，\n"
+                "将自动切片并输出 weight_sensitivity.csv（长表：变体 × 尺度），\n"
+                "可选在既有 report.md 末尾追加一节。"
+            ),
+            font=s.font("body"), text_color=s.MUTED,
+            anchor="w", justify="left",
+        )
+        self._sens_placeholder.grid(row=0, column=0, columnspan=2,
+                                    sticky="w", pady=4)
+
+        self.sens_conclusion_label = ctk.CTkLabel(
+            sens_result_card, text="",
+            font=s.font("body", bold=True),
+            anchor="w", justify="left", wraplength=560,
+        )
+        self.sens_conclusion_label.pack(fill="x", padx=12, pady=(4, 2))
+
+        self.sens_out_label = ctk.CTkLabel(
+            sens_result_card, text="",
+            font=s.font("footnote"), text_color=s.MUTED,
+            anchor="w", justify="left", wraplength=560,
+        )
+        self.sens_out_label.pack(fill="x", padx=12, pady=(0, 4))
+        add_copy_button(sens_result_card, lambda: self._sens_report_text,
+                        label="📋 复制摘要")
+
     # ── 指标网格 ──
     def _metric(self, index: int, name: str, value: str,
-                color=None) -> None:
-        """在单列网格中添加一行指标（显著=绿、不显著=灰）。"""
+                color=None, target=None) -> None:
+        """在单列网格中添加一行指标（显著=绿、不显著=灰）。
+
+        ``target`` 缺省为实验结果网格，敏感性结果传入自己的网格。
+        """
+        grid = target if target is not None else self.metrics_grid
         ctk.CTkLabel(
-            self.metrics_grid, text=name,
+            grid, text=name,
             font=s.font("footnote"), text_color=s.MUTED,
             anchor="e", width=180,
         ).grid(row=index, column=0, sticky="e", padx=(4, 8), pady=2)
         ctk.CTkLabel(
-            self.metrics_grid, text=value,
+            grid, text=value,
             font=s.font("body", bold=True, mono=True),
             text_color=color if color is not None else s.TEXT,
             anchor="w", justify="left", wraplength=400,
@@ -1798,6 +1963,7 @@ class ExperimentTab(ctk.CTkFrame):
         mode = self.mode_var.get()
         clean = self.clean_var.get()
         self.run_btn.configure(state="disabled")
+        self.sens_run_btn.configure(state="disabled")
         self.open_btn.configure(state="disabled")
         self.stage_var.set("准备中…")
         self.progress_bar.set(0)
@@ -1933,6 +2099,7 @@ class ExperimentTab(ctk.CTkFrame):
         self.progress_bar.set(1)
         self.open_btn.configure(state="normal")
         self.run_btn.configure(state="normal")
+        self.sens_run_btn.configure(state="normal")
         self.app.set_status(
             f"批量实验完成 — 组间/组内 Delta 比值 {ratio_str}")
 
@@ -1945,15 +2112,243 @@ class ExperimentTab(ctk.CTkFrame):
         self.stage_var.set("失败")
         self.progress_bar.set(0)
         self.run_btn.configure(state="normal")
+        self.sens_run_btn.configure(state="normal")
         self.app.set_status("批量实验失败")
 
     def _open_output(self) -> None:
         if not self._out_dir:
             return
+        self._open_folder(self._out_dir)
+
+    # ── 权重敏感性（v2.3.0）──
+    def _pick_sens_input(self) -> None:
+        path = filedialog.askdirectory(title="选择语料目录（原始文本）")
+        if not path:
+            return
+        self.sens_input_var.set(path)
+        # 输出目录为空时自动填默认值
+        if not self.sens_output_var.get().strip():
+            self.sens_output_var.set(
+                os.path.join(path, "weight_sensitivity"))
+
+    def _pick_sens_output(self) -> None:
+        path = filedialog.askdirectory(title="选择敏感性分析输出目录")
+        if path:
+            self.sens_output_var.set(path)
+
+    def _pick_sens_report(self) -> None:
+        path = filedialog.askopenfilename(
+            title="选择要追加的 report.md",
+            filetypes=[("Markdown 报告", "*.md")])
+        if path:
+            self.sens_report_var.set(path)
+
+    def run_sensitivity(self) -> None:
+        """收集语料目录与切片规模，后台自动切片并运行权重敏感性分析。"""
+        input_dir = self.sens_input_var.get().strip()
+        if not input_dir:
+            messagebox.showinfo("提示", "请先选择语料目录。")
+            return
+        if not os.path.isdir(input_dir):
+            messagebox.showerror("错误", f"语料目录不存在：{input_dir}")
+            return
+
+        sizes = [size for size, var in self.sens_scale_checks.items()
+                 if var.get()]
+        custom = self.sens_custom_var.get().strip()
+        if custom:
+            try:
+                csize = int(custom)
+                if csize <= 0:
+                    raise ValueError
+            except ValueError:
+                messagebox.showerror(
+                    "错误", "自定义切片规模必须是正整数（词数）。")
+                return
+            if csize not in sizes:
+                sizes.append(csize)
+        if not sizes:
+            messagebox.showinfo(
+                "提示", "请至少勾选一个切片规模，或填写自定义规模。")
+            return
+
+        scheme = dict(self._SENS_SCHEMES)[self.sens_scheme_var.get()]
+
+        out_dir = self.sens_output_var.get().strip()
+        if not out_dir:
+            out_dir = os.path.join(input_dir, "weight_sensitivity")
+            self.sens_output_var.set(out_dir)
+
+        report = self.sens_report_var.get().strip()
+        if report and not os.path.isfile(report):
+            messagebox.showerror("错误", f"报告文件不存在：{report}")
+            return
+
+        if self._runner.is_running():
+            return
+
+        self.run_btn.configure(state="disabled")
+        self.sens_run_btn.configure(state="disabled")
+        self.sens_open_btn.configure(state="disabled")
+        self.stage_var.set("准备中…")
+        self.progress_bar.set(0)
+        self.app.set_status("正在自动切片并运行权重敏感性分析……")
+        self._runner.run(
+            self._do_sensitivity,
+            args=(input_dir, sizes, scheme, out_dir, report or None),
+            kwargs={"progress_callback": self._enqueue_progress},
+            on_success=self._on_sens_result,
+            on_error=self._on_sens_error,
+            title="权重敏感性",
+            message="正在自动切片并按 权重变体 × 尺度 重算指纹指标，请稍候...",
+            show_dialog=False,
+        )
+        self._drain_progress()
+
+    @staticmethod
+    def _do_sensitivity(input_dir: str, sizes: list, scheme: str,
+                        out_dir: str, report: Optional[str],
+                        progress_callback=None) -> tuple:
+        """后台线程执行：按勾选规模自动切片 + 权重敏感性分析。
+
+        返回 (rows, out_dir, scheme)。只调用 experiments 包的核心函数
+        （slice_corpus / weight_sensitivity.run_sensitivity），
+        不复制实验逻辑。
+        """
+        from pathlib import Path
+
+        # 与 _do_experiment 同理：惰性导入链会触及 matplotlib，
+        # 在非主线程临时切到无界面的 Agg 后端。
+        import matplotlib
+        import matplotlib.pyplot as plt
+
+        prev_backend = matplotlib.get_backend()
+        if prev_backend.lower() != "agg":
+            plt.switch_backend("Agg")
+        try:
+            from experiments.slice_corpus import slice_corpus
+            from experiments.weight_sensitivity import (
+                run_sensitivity as _run_sensitivity,
+            )
+
+            # 自动切片：每个规模切到 输出目录/sliced_{size}（清空旧切片）
+            scale_inputs = {}
+            for size in sizes:
+                label = f"{size / 1000:g}k"
+                sliced_dir = Path(out_dir) / f"sliced_{size}"
+                written = slice_corpus(Path(input_dir), sliced_dir, size,
+                                       clean=True,
+                                       progress_callback=progress_callback)
+                if not written:
+                    raise ValueError(
+                        f"{label} 尺度切片为空：所有文本都短于 "
+                        f"0.5 × {size} 词，请取消该尺度或减小切片规模。")
+                scale_inputs[label] = sliced_dir
+
+            rows = _run_sensitivity(
+                scale_inputs, scheme=scheme, out_dir=Path(out_dir),
+                report_path=Path(report) if report else None,
+                progress_callback=progress_callback,
+            )
+        finally:
+            if prev_backend.lower() != "agg":
+                plt.switch_backend(prev_backend)
+        return rows, out_dir, scheme
+
+    def _on_sens_result(self, payload: tuple) -> None:
+        rows, out_dir, scheme = payload
+        self._sens_out_dir = out_dir
+
+        scales: list = []
+        for r in rows:
+            if r["scale"] not in scales:
+                scales.append(r["scale"])
+        n_variants = len({r["variant"] for r in rows})
+
+        clear_widget(self.sens_metrics_grid)
+        metrics = [("方案 / 规模",
+                    f"{scheme} — {n_variants} 变体 × {len(scales)} 尺度", None)]
+        for scale in scales:
+            srows = [r for r in rows if r["scale"] == scale]
+            ds = [r["d"] for r in srows]
+            wins = [r["competition_wins"] for r in srows]
+            pairs = max(r["competition_pairs"] for r in srows)
+            accs = [r["knn_acc"] for r in srows]
+            base = srows[0]["knn_baseline"]
+            metrics.append((
+                f"Cohen's d 范围（{scale}）",
+                f"{min(ds):.3f} ~ {max(ds):.3f}",
+                s.SUCCESS if min(ds) > 0 else s.MUTED))
+            metrics.append((
+                f"信号竞争原文胜（{scale}）",
+                f"{min(wins)} ~ {max(wins)} / {pairs}",
+                s.SUCCESS if pairs and min(wins) > pairs / 2 else s.MUTED))
+            metrics.append((
+                f"1-NN 准确率（{scale}）",
+                f"{min(accs):.4f} ~ {max(accs):.4f}（基线 {base:.4f}）",
+                s.SUCCESS if min(accs) > base else s.MUTED))
+        for i, (name, value, color) in enumerate(metrics):
+            self._metric(i, name, value, color, target=self.sens_metrics_grid)
+
+        # 一句话结论：所有变体 × 尺度下 d>0 且原文信号获胜过半才算稳定
+        d_min = min(r["d"] for r in rows)
+        win_min = min(r["competition_wins"] for r in rows)
+        pairs_max = max(r["competition_pairs"] for r in rows)
+        stable = d_min > 0 and (pairs_max == 0 or win_min > pairs_max / 2)
+        if stable:
+            conclusion = (
+                f"全部 {n_variants} 个变体 × {len(scales)} 个尺度下 "
+                f"Cohen's d 均为正、原文信号获胜过半："
+                f"结论不依赖启发式权重。")
+        else:
+            conclusion = (
+                "部分变体/尺度下结论有变化，"
+                "请查看 weight_sensitivity.csv 定位受影响的变体。")
+        conclusion += (
+            "（头条 Delta 结果——距离矩阵、信号竞争、树状图——"
+            "不读取权重配置，与权重天然解耦。）")
+
+        self._sens_report_text = "\n".join(
+            ["权重敏感性结果摘要", ""]
+            + [f"{name}：{value}" for name, value, _ in metrics]
+            + ["", f"【结论】{conclusion}", f"输出目录：{out_dir}"]
+        )
+
+        self.sens_conclusion_label.configure(text=f"【结论】{conclusion}")
+        self.sens_out_label.configure(
+            text=f"长表见输出目录：{out_dir}/weight_sensitivity.csv")
+
+        self.stage_var.set("完成")
+        self.progress_bar.set(1)
+        self.sens_open_btn.configure(state="normal")
+        self.run_btn.configure(state="normal")
+        self.sens_run_btn.configure(state="normal")
+        self.app.set_status(
+            f"权重敏感性分析完成 — {n_variants} 变体 × {len(scales)} 尺度")
+
+    def _on_sens_error(self, e: Exception) -> None:
+        messagebox.showerror(
+            "敏感性分析失败",
+            f"{e}\n\n请检查：语料目录下是否至少有 2 个组子文件夹，"
+            f"且每组文本足够长（切片后每组至少 2 个样本）。",
+        )
+        self.stage_var.set("失败")
+        self.progress_bar.set(0)
+        self.run_btn.configure(state="normal")
+        self.sens_run_btn.configure(state="normal")
+        self.app.set_status("权重敏感性分析失败")
+
+    def _open_sens_output(self) -> None:
+        if not self._sens_out_dir:
+            return
+        self._open_folder(self._sens_out_dir)
+
+    @staticmethod
+    def _open_folder(folder: str) -> None:
         import subprocess
         import sys
 
-        path = os.path.normpath(self._out_dir)
+        path = os.path.normpath(folder)
         try:
             if sys.platform == "win32":
                 os.startfile(path)  # type: ignore[attr-defined]

@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import csv
 import random
+import re
 import sys
 import tempfile
 from pathlib import Path
@@ -323,3 +324,150 @@ def test_all_schemes_produce_rows():
                                    out_dir=root / f"out_{scheme}")
             assert len(rows) == n_rows, f"{scheme}: {len(rows)} rows"
             assert (root / f"out_{scheme}" / "weight_sensitivity.csv").is_file()
+
+
+# ── v2.3.0 返修：尺度生效性自检与 all 方案 ────────────────────────────
+
+
+def _build_unbalanced_groups(root: Path, chunk_size: int) -> Path:
+    """非均衡分组：translator_A 多一篇 1300 词的孤儿篇目 work3。
+
+    各尺度的多数类比例随 tail 规则变化（1k: 7/13，2k: 5/9，4k: 2/4），
+    用于验证 knn_baseline 确实按各尺度 chunk 数计算。
+    """
+    from experiments.slice_corpus import chunk_text
+
+    def _read(fname: str) -> str:
+        return next(_SAMPLE_DIR.rglob(fname)).read_text(encoding="utf-8")
+
+    def _first_words(text: str, n: int) -> str:
+        ends = [m.end() for m in re.finditer(r"[A-Za-z]+", text)]
+        assert len(ends) >= n
+        return text[: ends[n - 1]]
+
+    mapping = {
+        "translator_A": {
+            "work1": _read("text_the_a.txt"),
+            "work2": _read("text_the_b.txt"),
+            "work3": _first_words(_read("text_the_a.txt"), 1300),
+        },
+        "translator_B": {
+            "work1": _read("text_of_a.txt"),
+            "work2": _read("text_of_b.txt"),
+        },
+    }
+    inp = root / f"input_{chunk_size}"
+    for group, works in mapping.items():
+        gdir = inp / group
+        gdir.mkdir(parents=True)
+        for stem, text in works.items():
+            for k, chunk in enumerate(chunk_text(text, chunk_size), 1):
+                (gdir / f"{stem}__chunk{k:03d}.txt").write_text(
+                    chunk, encoding="utf-8")
+    return inp
+
+
+def test_scales_produce_distinct_rows_and_true_baselines():
+    """Bug-1 自检：同一变体在三档尺度上的 d 不得全部相同，且
+    knn_baseline 必须等于按各尺度 chunk 数独立算出的多数类比例。"""
+    if not _has_matplotlib():
+        print("    (skipped: matplotlib not installed)")
+        return
+
+    with tempfile.TemporaryDirectory() as td:
+        root = Path(td)
+        inputs = {
+            scale: _build_unbalanced_groups(root, size)
+            for scale, size in (("1k", 1000), ("2k", 2000), ("4k", 4000))
+        }
+
+        # 独立重算各尺度多数类比例（不经过被测代码）。
+        expected_baseline = {}
+        for scale, inp in inputs.items():
+            counts = [len(list(g.glob("*.txt")))
+                      for g in inp.iterdir() if g.is_dir()]
+            assert all(c >= 2 for c in counts), f"{scale}: 构造失败 {counts}"
+            expected_baseline[scale] = max(counts) / sum(counts)
+        # 测试数据必须让三档基线不全相同，否则自检无效。
+        assert len({round(v, 9) for v in expected_baseline.values()}) > 1, \
+            f"测试数据构造失败：三档基线相同 {expected_baseline}"
+
+        rows = run_sensitivity(inputs, scheme="uniform")
+        assert len(rows) == 3
+        by_scale = {r["scale"]: r for r in rows}
+        assert set(by_scale) == {"1k", "2k", "4k"}
+
+        ds = {s: by_scale[s]["d"] for s in by_scale}
+        assert len(set(ds.values())) > 1, f"三档 d 全部相同: {ds}"
+        for s, row in by_scale.items():
+            assert row["knn_baseline"] == expected_baseline[s], (
+                f"{s}: baseline {row['knn_baseline']} != "
+                f"真实多数类比例 {expected_baseline[s]}")
+
+
+def test_duplicate_scale_dirs_rejected():
+    """Bug-1 护栏：多个尺度指向同一目录会直接报错，不再静默产出
+    逐字节相同的行。"""
+    with tempfile.TemporaryDirectory() as td:
+        root = Path(td)
+        inp = _build_paired_groups(root, chunk_size=1000)
+        try:
+            run_sensitivity({"1k": inp, "2k": inp})
+        except ValueError as e:
+            assert "same directory" in str(e)
+        else:
+            raise AssertionError("重复尺度目录未被拒绝")
+
+
+def test_all_scheme_is_38_variants():
+    """all = default + uniform + 8 lodo + 8 single + 20 random = 38 变体。"""
+    variants = variants_for_scheme("all")
+    assert len(variants) == 38
+    names = [n for n, _ in variants]
+    assert names[0] == "default" and names[1] == "uniform"
+    assert sum(n.startswith("lodo_") for n in names) == 8
+    assert sum(n.startswith("single_") for n in names) == 8
+    assert sum(n.startswith("random_") for n in names) == RANDOM_VARIANTS
+    # 与逐族拼接结果完全一致（同序同权重）。
+    assert variants == (
+        variants_for_scheme("default") + variants_for_scheme("uniform")
+        + variants_for_scheme("lodo") + variants_for_scheme("single")
+        + variants_for_scheme("random"))
+
+
+def test_all_scheme_full_table_and_overwrite():
+    """Bug-2 自检：all × 3 尺度 = 114 行；重复运行覆盖写，行数不增。"""
+    if not _has_matplotlib():
+        print("    (skipped: matplotlib not installed)")
+        return
+
+    with tempfile.TemporaryDirectory() as td:
+        root = Path(td)
+        inputs = {
+            scale: _build_paired_groups(root / f"b{size}", chunk_size=size)
+            for scale, size in (("1k", 1000), ("2k", 2000), ("4k", 4000))
+        }
+        out = root / "out"
+
+        rows = run_sensitivity(inputs, scheme="all", out_dir=out)
+        assert len(rows) == 38 * 3
+
+        csv_path = out / "weight_sensitivity.csv"
+        with csv_path.open(newline="", encoding="utf-8-sig") as f:
+            table = list(csv.reader(f))
+        assert len(table) == 1 + 114
+        assert {r[1] for r in table[1:]} == {"1k", "2k", "4k"}
+        # 每个变体族在三档都有行
+        families = {"default": 1, "uniform": 1, "lodo_": 8,
+                    "single_": 8, "random_": RANDOM_VARIANTS}
+        for prefix, n in families.items():
+            hit = [r for r in table[1:]
+                   if r[0] == prefix or r[0].startswith(prefix)]
+            assert len(hit) == n * 3, f"{prefix}: {len(hit)} rows"
+
+        # 覆盖写：再跑一次（换个方案也行），CSV 不追加、行数正确。
+        rows2 = run_sensitivity(inputs, scheme="all", out_dir=out)
+        assert len(rows2) == 114
+        with csv_path.open(newline="", encoding="utf-8-sig") as f:
+            table2 = list(csv.reader(f))
+        assert len(table2) == 1 + 114

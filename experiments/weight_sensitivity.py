@@ -9,6 +9,8 @@ schemes to show the conclusions do not depend on that choice.
 
 Schemes (``--weights``):
 
+- ``all`` (default): every family below in one run — 38 variants
+  (1 default + 1 uniform + 8 lodo + 8 single + 20 random);
 - ``default``: the existing weights — results are identical to the
   fingerprint metrics produced by ``run_experiment.py`` without any switch;
 - ``uniform``: all eight dimensions weighted 1/8;
@@ -37,7 +39,7 @@ Usage:
     python experiments/weight_sensitivity.py \
         --scale 1k=corpus_sliced_1000 --scale 2k=corpus_sliced_2000 \
         --scale 4k=corpus_sliced_4000 \
-        --weights lodo --out sensitivity_out \
+        --weights all --out sensitivity_out \
         --report experiment_output_2000/report.md
 """
 
@@ -84,7 +86,9 @@ __all__ = [
 # Fixed dimension order (FEATURE_WEIGHTS insertion order).
 DIMENSIONS: Tuple[str, ...] = tuple(FEATURE_WEIGHTS)
 
-SCHEMES = ("default", "uniform", "lodo", "single", "random")
+# "all" runs every family in one pass: default + uniform + 8 lodo
+# + 8 single + 20 random = 38 variants.
+SCHEMES = ("all", "default", "uniform", "lodo", "single", "random")
 
 RANDOM_BASE_SEED = 20260818
 RANDOM_VARIANTS = 20
@@ -115,14 +119,21 @@ def variants_for_scheme(
 ) -> List[Tuple[str, Dict[str, float]]]:
     """Return the ``(variant_name, weights)`` list for one scheme.
 
-    :param scheme: one of ``SCHEMES``
+    :param scheme: one of ``SCHEMES``; "all" concatenates every family
+        (default + uniform + lodo + single + random = 38 variants)
     :param n_random: number of ``random`` variants
     :param base_seed: first seed of the ``random`` scheme; each variant i
         uses its own ``random.Random(base_seed + i)`` stream, so the
         global RNG state is never touched and results are reproducible
     :return: ordered list of variants (1 for default/uniform, 8 for
-        lodo/single, ``n_random`` for random)
+        lodo/single, ``n_random`` for random, 1+1+8+8+``n_random`` for all)
     """
+    if scheme == "all":
+        return (variants_for_scheme("default")
+                + variants_for_scheme("uniform")
+                + variants_for_scheme("lodo")
+                + variants_for_scheme("single")
+                + variants_for_scheme("random", n_random, base_seed))
     if scheme == "default":
         return [("default", dict(FEATURE_WEIGHTS))]
     if scheme == "uniform":
@@ -288,7 +299,9 @@ def run_sensitivity(
     """Run all variants of ``scheme`` over every scale and write the CSV.
 
     :param scale_inputs: ``{scale_label: grouped_input_dir}`` (insertion
-        order is preserved in the output)
+        order is preserved in the output). Two scale labels resolving to
+        the same directory are rejected — that would silently produce
+        identical rows for different scales.
     :param scheme: one of ``SCHEMES``
     :param out_dir: directory for ``weight_sensitivity.csv``; None skips
         writing the CSV (library use)
@@ -300,6 +313,19 @@ def run_sensitivity(
     :return: list of row dicts (CSV_COLUMNS plus ``competition_pairs``)
     """
     variants = variants_for_scheme(scheme)
+
+    # Guard: distinct scale labels must point at distinct directories,
+    # otherwise every variant would report byte-identical rows across
+    # "scales" (the v2.3.0 batch bug).
+    seen_dirs: Dict[Path, str] = {}
+    for scale, input_dir in scale_inputs.items():
+        resolved = Path(input_dir).resolve()
+        if resolved in seen_dirs:
+            raise ValueError(
+                f"scales '{seen_dirs[resolved]}' and '{scale}' point at "
+                f"the same directory: {resolved}")
+        seen_dirs[resolved] = scale
+
     rows: List[Dict[str, object]] = []
     total = len(scale_inputs) * len(variants)
     done = 0
@@ -452,14 +478,15 @@ def main() -> None:
         help="one grouped input directory per scale, e.g. "
              "--scale 1k=corpus_sliced_1000 (repeatable; each DIR follows "
              "the run_experiment.py input layout: one subdirectory per "
-             "group)")
+             "group; scale names must map to distinct directories)")
     parser.add_argument(
-        "--weights", default="default", choices=SCHEMES,
-        help="weight scheme: default (existing weights, identical to no "
-             "switch), uniform (1/8 each), lodo (leave-one-dimension-out, "
-             "8 variants), single (one dimension at a time, 8 variants), "
+        "--weights", default="all", choices=SCHEMES,
+        help="weight scheme: all (every family, 38 variants; the default), "
+             "default (existing weights, identical to no switch), uniform "
+             "(1/8 each), lodo (leave-one-dimension-out, 8 variants), "
+             "single (one dimension at a time, 8 variants), "
              "random (perturb within [0.5w, 1.5w], 20 seeds from "
-             f"{RANDOM_BASE_SEED}) (default: default)")
+             f"{RANDOM_BASE_SEED})")
     parser.add_argument("--out", required=True,
                         help="output directory for weight_sensitivity.csv")
     parser.add_argument("--report", default=None,

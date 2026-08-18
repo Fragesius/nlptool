@@ -127,15 +127,19 @@ python experiments/weight_sensitivity.py \
     --scale 1k=corpus_sliced_1000 \
     --scale 2k=corpus_sliced_2000 \
     --scale 4k=corpus_sliced_4000 \
-    --weights lodo \
+    --weights all \
     --out sensitivity_out \
     --report experiment_output_2000/report.md
 ```
 
 - `--scale NAME=DIR`: one grouped input directory per scale (repeatable;
   each `DIR` follows the same input layout convention as
-  `run_experiment.py`).
-- `--weights {default,uniform,lodo,single,random}`: `default` keeps the
+  `run_experiment.py`). Scale names must map to **distinct** directories —
+  pointing two scales at the same directory is rejected, because it would
+  silently produce byte-identical rows across "scales".
+- `--weights {all,default,uniform,lodo,single,random}`: `all` (the
+  default) runs every family in one pass — 38 variants (1 `default` +
+  1 `uniform` + 8 `lodo` + 8 `single` + 20 `random`); `default` keeps the
   existing weights (identical to running without the switch); `uniform`
   weights all eight dimensions 1/8; `lodo` zeroes one dimension at a time
   and renormalizes the rest in their original proportions (8 variants);
@@ -146,8 +150,9 @@ python experiments/weight_sensitivity.py \
   a one-sentence conclusion) to an existing `report.md`; the append is
   pure — no existing content is modified.
 
-Output: `weight_sensitivity.csv`, a long table with one row per
-variant x scale and columns `variant, scale, within, between, d,
+Output: `weight_sensitivity.csv` (overwritten on each run), a long table
+with one row per variant x scale — 114 rows for `all` x three scales —
+and columns `variant, scale, within, between, d,
 competition_wins, knn_acc, knn_baseline`. Note that the headline
 Burrows' Delta pipeline (Delta matrix, Delta-based signal competition,
 dendrogram) never reads the fingerprint weight configuration, so those

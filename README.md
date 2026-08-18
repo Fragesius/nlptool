@@ -120,8 +120,9 @@ MIT © 2026 Fragesius
 ### v2.3.0 — 权重敏感性分析：证明结论不依赖指纹权重
 
 📊 **权重敏感性分析（`experiments/weight_sensitivity.py`，新增）**
-- 在 `default` / `uniform` / `lodo` / `single` / `random` 五种权重方案下重跑指纹类组级指标：组内/组间平均距离、Cohen's d、信号竞争检验与 1-NN 留一法准确率（含多数类基线），输出长表 `weight_sensitivity.csv`（variant × scale）
-- `--scale NAME=DIR` 可多尺度重复指定；`--weights` 指定方案；`--report` 把「Weight sensitivity」小结追加进已有 `report.md`（纯追加，不改动原文）
+- 在 `all` / `default` / `uniform` / `lodo` / `single` / `random` 权重方案下重跑指纹类组级指标：组内/组间平均距离、Cohen's d、信号竞争检验与 1-NN 留一法准确率（含多数类基线），输出长表 `weight_sensitivity.csv`（variant × scale，每次运行覆盖写）
+- `--weights all`（默认）一次跑齐 38 个变体（1 default + 1 uniform + 8 lodo + 8 single + 20 random），三档尺度共 114 行
+- `--scale NAME=DIR` 可多尺度重复指定；多个尺度指向同一目录会被拒绝（防止各档结果静默逐字节相同）；`--report` 把「Weight sensitivity」小结追加进已有 `report.md`（纯追加，不改动原文）
 - `random` 方案对每维权重在 [0.5w, 1.5w] 内均匀扰动再归一化，20 个种子自 20260818 起，各自独立随机流，不污染全局随机状态
 
 🔧 **加权余弦相似度支持权重覆盖（`core/linguistic_fingerprint.py`）**
@@ -130,6 +131,10 @@ MIT © 2026 Fragesius
 🧪 **测试与文档**
 - 新增 `tests/test_weight_sensitivity.py`
 - `README_EN.md` 新增「Step 3 (optional): weight sensitivity analysis」章节
+
+🖱 **GUI：实验页新增「⚖ 权重敏感性」区块**
+- 选择原始语料目录，勾选 1k/2k/4k 切片规模（可加自定义词数），一键自动切片并运行（默认全部方案 all，38 变体），无需命令行与手动切片；可选把「Weight sensitivity」一节追加进既有 `report.md`
+- 结果以指标网格展示各尺度的 Cohen's d 范围、信号竞争原文获胜数与 1-NN 准确率（带语义色），附一句话稳定性结论
 
 ### v2.2.0 — 统计与图：多尺度切片、篇目级统计与自助法稳健性
 
