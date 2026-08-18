@@ -117,6 +117,36 @@ MIT © 2026 Fragesius
 
 ## 📦 Changelog
 
+### v2.2.0 — 统计与图：多尺度切片、篇目级统计与自助法稳健性
+
+📊 **篇目级统计（`experiments/story_stats.py`，新增）**
+- `story_wilcoxon`：按篇目构造同译者减跨译者相似度差值，做篇目级 Wilcoxon 符号秩检验，报告 W、p 与秩双列相关 r 作为效应量
+- `bootstrap_d_ci`：以篇目为单元自助重抽样，估计 Cohen's d 的 95% 置信区间；使用独立随机种子（默认 20260818），不干扰置换检验的随机流
+- `equal_chunk_robustness`：把每个「篇目 × 译者」单元格降采样到最小切片数，重跑信号竞争检验与 Cohen's d，排除切片数不均衡的干扰
+- 三个函数均为纯 Python、确定性实现
+
+🔀 **多尺度切片与稳健性接线（`experiments/run_experiment.py`）**
+- 新增 `--scale`：记入 v2.2.0 篇目级 CSV 产物的切片尺度标签（如 1k/2k/4k）
+- 新增 `--boot-n`（篇目级自助法次数，默认 10000）与 `--boot-seed`（独立自助法随机种子）
+- 报告新增稳健性检验段：篇目级自助法置信区间、篇目级 Wilcoxon 检验与均衡切片检验
+
+🧪 **测试与图**
+- 新增 `tests/test_story_stats.py`，覆盖三个统计函数的确定性与数值，兼容 `python run_tests.py`
+- `viz/dendrogram.py` 图式改进
+
+### v2.1.0 — 英文化：英文 CLI、英文报告与英文 README
+
+🌐 **英文 CLI**
+- `experiments/run_delta.py` 的命令行帮助、stdout 提示与报错信息全面英文化
+
+🌍 **英文报告输出（`experiments/run_experiment.py`）**
+- 新增 `--report-lang {zh,en}`（默认 zh）：`report.md` 模板文字可切换中英文，数字、表格结构与 CSV 产物两种语言完全一致
+
+📘 **英文 README 与测试**
+- 新增 `README_EN.md`（英文项目说明）
+- 新增 `tests/test_report_lang.py`，覆盖中英文报告模板一致性
+- 更新 `.gitignore`
+
 ### v2.0.0 — 性能重构、新研究指标、进度系统与 GUI 现代化
 
 ⚡ **实验管线性能重构（统计结果零变化）**
