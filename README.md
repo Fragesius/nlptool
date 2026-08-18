@@ -115,10 +115,6 @@ MIT © 2026 Fragesius
 
 ---
 
-> *Built with Python, linguistics, and curiosity.* 🧠
-
----
-
 ## 📦 Changelog
 
 ### v2.0.0 — 性能重构、新研究指标、进度系统与 GUI 现代化
