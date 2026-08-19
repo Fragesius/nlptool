@@ -126,6 +126,26 @@ MIT © 2026 Fragesius
 
 ## 📦 Changelog
 
+### v2.4.1 — 发布数据补齐（不动核心算法）
+
+论文配套的事后分析与剩余发布产物；pipeline 主逻辑零改动。
+
+- `scripts/posthoc_v9.py`（新增独立脚本）：(1) 剔除全部同故事对后的
+  聚合指标——指纹 Cohen's d（pooled SD，与主分析同一公式）与 Delta
+  组内/组间均值及比率，三尺度 → `results/same_story_exclusion_d.csv`；
+  (2) 各尺度 Delta 矩阵的最近邻结构（最近邻为同故事另一译本占比、
+  同故事任意译本占比、1-NN 译者准确率）→
+  `results/nn_structure_proportions.csv`。脚本写入前会先断言手算
+  验证过的 4k 参考值。
+- `scripts/export_linkage_dendrograms.py`（新增独立脚本）：对已发布的
+  Delta 矩阵在 single / complete / average 三种 linkage 下重新聚类
+  出图 → `results/dendrograms/`（9 张 PNG，复用 `viz.dendrogram`
+  渲染；average linkage 与管线原生聚类一致）。
+- 数据缺口补齐：`data/delta_matrix_4k.csv`（v2.3.1 起被称为"既有"
+  的 4k 矩阵，本次实际入库）、`results/signal_competition_<尺度>.csv`
+  （主跑信号竞争明细）、`results/mfw_sensitivity.csv`（自
+  `data/mfw_sensitivity.csv` 镜像）。
+
 ### v2.4.0 — GUI 加固与工程整理（数值零变化）
 
 护栏验证：全部改动完成后，在真实语料上重跑三尺度全管线（1k/2k/4k

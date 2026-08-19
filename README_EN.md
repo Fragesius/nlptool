@@ -195,6 +195,28 @@ python experiments/export_paper_data.py --input corpus \
   fingerprint_pairs); a control check, not part of the paper's main
   tables. Use `--skip-control` to export only the `data/` artifacts.
 
+Release bundle (v2.4.1) — remaining artifacts referenced by the paper:
+
+- `data/delta_matrix_4k.csv` — the 4k chunk-level Delta matrix (46
+  chunks) referenced above; format identical to the 1k/2k matrices.
+- `results/signal_competition_<scale>.csv` — main-run per-work
+  signal-competition results at 1k/2k/4k (the tokenizer-control
+  directory holds the control-run copies).
+- `results/mfw_sensitivity.csv` — the MFW-count sensitivity scan,
+  mirrored from `data/mfw_sensitivity.csv` for the release bundle.
+- `results/same_story_exclusion_d.csv` — post-hoc aggregates with all
+  same-story pairs excluded (`scripts/posthoc_v9.py`): fingerprint
+  Cohen's d (same- vs cross-translator similarity, pooled SD) and Delta
+  within/between means with their ratio, at 1k/2k/4k.
+- `results/nn_structure_proportions.csv` — nearest-neighbour structure
+  of each Delta matrix (`scripts/posthoc_v9.py`): share of chunks whose
+  NN is the same story in the other translation / in any translation,
+  and the 1-NN translator accuracy.
+- `results/dendrograms/dendrogram_<scale>_<linkage>.png` — dendrograms
+  under single / complete / average linkage for all three scales
+  (`scripts/export_linkage_dendrograms.py`; average linkage reproduces
+  the pipeline's native clustering).
+
 ## Reproducing a dual-translation experiment
 
 A typical use case is comparing two groups of parallel translations (e.g.
@@ -289,6 +311,27 @@ weight_sensitivity CSVs, report.md, dendrogram).
   with a comment); `run_delta.py` is deprecated (use `run_experiment.py`)
   with a smoke test; `run_tests.py` is now a thin pytest wrapper.
 - Tests: 92 → 99 (6 new cancellation-semantics + 1 run_delta smoke).
+
+## Changelog note: v2.4.1 — release data completion (no code changes)
+
+Post-hoc analyses and the remaining paper artifacts; the pipeline itself
+is untouched.
+
+- `scripts/posthoc_v9.py` (new, standalone): (1) aggregate metrics with
+  all same-story pairs excluded — fingerprint Cohen's d (pooled SD, same
+  formula as the main analysis) and Delta within/between means + ratio
+  at 1k/2k/4k → `results/same_story_exclusion_d.csv`; (2) nearest-
+  neighbour structure of each Delta matrix (NN from same story / other
+  translation, same story / any translation, 1-NN translator accuracy)
+  → `results/nn_structure_proportions.csv`. The script asserts the
+  hand-verified 4k reference values before writing.
+- `scripts/export_linkage_dendrograms.py` (new, standalone): re-clusters
+  the released Delta matrices under single / complete / average linkage
+  → `results/dendrograms/` (9 PNGs, rendered with `viz.dendrogram`).
+- Data gaps filled: `data/delta_matrix_4k.csv` (the "existing" 4k matrix
+  referenced since v2.3.1, now actually committed),
+  `results/signal_competition_<scale>.csv` (main-run copies) and
+  `results/mfw_sensitivity.csv` (mirror of `data/mfw_sensitivity.csv`).
 
 ## Data & copyright
 

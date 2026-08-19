@@ -1,0 +1,4 @@
+﻿scale,n_chunks,nn_same_story_other_trans,nn_same_story_any,knn_acc
+1k,168,0.541667,0.809524,0.434524
+2k,83,0.530120,0.783133,0.457831
+4k,46,0.565217,0.717391,0.434783

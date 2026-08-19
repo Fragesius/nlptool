@@ -1,0 +1,4 @@
+﻿scale,d_excl_same_story,delta_within_excl,delta_between_excl,delta_ratio_excl
+1k,0.309102,1.048751,1.100701,1.049535
+2k,0.336633,1.065128,1.141026,1.071257
+4k,0.482255,1.063919,1.177725,1.106969
