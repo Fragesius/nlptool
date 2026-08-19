@@ -213,9 +213,15 @@ Release bundle (v2.4.1) — remaining artifacts referenced by the paper:
   NN is the same story in the other translation / in any translation,
   and the 1-NN translator accuracy.
 - `results/dendrograms/dendrogram_<scale>_<linkage>.png` — dendrograms
-  under single / complete / average linkage for all three scales
+  under four linkage rules (average / complete / Ward / single) for all
+  three scales, 4 linkage x 3 scale = 12 PNGs
   (`scripts/export_linkage_dendrograms.py`; average linkage reproduces
-  the pipeline's native clustering).
+  the pipeline's native clustering; the script asserts the paper's 4k
+  exact-story-subtree reference counts before writing).
+- `data/weight_sensitivity.csv` — fingerprint weight-sensitivity long
+  table (38 variants x 3 scales, 114 rows): within/between group means,
+  Cohen's d, signal-competition wins and 1-NN accuracy with baseline
+  per variant x scale; mirrored as `results/weight_sensitivity.csv`.
 
 ## Reproducing a dual-translation experiment
 
@@ -312,6 +318,20 @@ weight_sensitivity CSVs, report.md, dendrogram).
   with a smoke test; `run_tests.py` is now a thin pytest wrapper.
 - Tests: 92 → 99 (6 new cancellation-semantics + 1 run_delta smoke).
 
+## Changelog note: v2.4.2 — Ward linkage & weight-sensitivity data
+
+- `scripts/export_linkage_dendrograms.py` now also exports Ward linkage
+  (Ward.D2, Lance-Williams update on squared distances):
+  `results/dendrograms/` holds 4 linkage x 3 scale = 12 PNGs. Before
+  writing, the script asserts the paper's 4k exact-story-subtree counts
+  (a story counts when its full chunk set appears as one node's leaf
+  set): average 9/16, complete 10/16, ward 10/16, single 5/16 — any
+  mismatch stops the export.
+- `data/weight_sensitivity.csv` committed (38 variants x 3 scales, 114
+  rows; referenced by paper sections 4.3/5.4) and mirrored as
+  `results/weight_sensitivity.csv`, same placement pattern as
+  `mfw_sensitivity.csv`.
+
 ## Changelog note: v2.4.1 — release data completion (no code changes)
 
 Post-hoc analyses and the remaining paper artifacts; the pipeline itself
@@ -327,7 +347,8 @@ is untouched.
   hand-verified 4k reference values before writing.
 - `scripts/export_linkage_dendrograms.py` (new, standalone): re-clusters
   the released Delta matrices under single / complete / average linkage
-  → `results/dendrograms/` (9 PNGs, rendered with `viz.dendrogram`).
+  → `results/dendrograms/` (12 PNGs since v2.4.2, rendered with
+  `viz.dendrogram`).
 - Data gaps filled: `data/delta_matrix_4k.csv` (the "existing" 4k matrix
   referenced since v2.3.1, now actually committed),
   `results/signal_competition_<scale>.csv` (main-run copies) and

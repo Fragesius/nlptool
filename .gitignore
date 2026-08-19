@@ -15,6 +15,8 @@ results_test/
 # 实验语料与输出（语料受版权保护，不入库）
 corpus/
 experiment_output/
+weight_sensitivity/
+/weight_sensitivity.csv
 
 # pytest 缓存（run_tests.py 之外的本地运行产物）
 .pytest_cache/

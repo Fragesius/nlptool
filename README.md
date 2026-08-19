@@ -126,6 +126,18 @@ MIT © 2026 Fragesius
 
 ## 📦 Changelog
 
+### v2.4.2 — Ward 联结与权重敏感性数据
+
+- `scripts/export_linkage_dendrograms.py` 新增 Ward 联结导出
+  （Ward.D2，平方距离上的 Lance-Williams 更新）：
+  `results/dendrograms/` 现为 4 联结 × 3 尺度 = 12 张 PNG。写入前
+  断言论文 4k 精确故事子树参考值（整篇切片恰好构成一个子树计 1 篇）：
+  average 9/16、complete 10/16、ward 10/16、single 5/16——任何一项
+  对不上即停止导出。
+- `data/weight_sensitivity.csv` 入库（38 变体 × 3 尺度，114 行；
+  论文 §4.3/§5.4 引用），并镜像为 `results/weight_sensitivity.csv`，
+  落位模式同 `mfw_sensitivity.csv`。
+
 ### v2.4.1 — 发布数据补齐（不动核心算法）
 
 论文配套的事后分析与剩余发布产物；pipeline 主逻辑零改动。
@@ -138,9 +150,9 @@ MIT © 2026 Fragesius
   `results/nn_structure_proportions.csv`。脚本写入前会先断言手算
   验证过的 4k 参考值。
 - `scripts/export_linkage_dendrograms.py`（新增独立脚本）：对已发布的
-  Delta 矩阵在 single / complete / average 三种 linkage 下重新聚类
-  出图 → `results/dendrograms/`（9 张 PNG，复用 `viz.dendrogram`
-  渲染；average linkage 与管线原生聚类一致）。
+  Delta 矩阵在 average / complete / Ward / single 四种 linkage 下重新
+  聚类出图 → `results/dendrograms/`（v2.4.2 起 12 张 PNG，复用
+  `viz.dendrogram` 渲染；average linkage 与管线原生聚类一致）。
 - 数据缺口补齐：`data/delta_matrix_4k.csv`（v2.3.1 起被称为"既有"
   的 4k 矩阵，本次实际入库）、`results/signal_competition_<尺度>.csv`
   （主跑信号竞争明细）、`results/mfw_sensitivity.csv`（自
