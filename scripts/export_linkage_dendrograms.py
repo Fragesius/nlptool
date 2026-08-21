@@ -1,7 +1,7 @@
 """Export dendrograms under four linkage rules (release artifact).
 
 The main pipeline (``core.stylometry.hierarchical_cluster``) is fixed to
-average linkage. For the paper's linkage-robustness appendix this script
+average linkage. As a linkage-robustness check this script
 re-clusters the released chunk-level Delta matrices
 (``data/delta_matrix_{1k,2k,4k}.csv``) under average / complete / Ward /
 single linkage and renders one dendrogram PNG per scale x linkage with
@@ -27,7 +27,7 @@ broken by scan order (same convention as
 Validation: before writing anything, the script counts *exact story
 subtrees* in each 4k dendrogram — a story counts when its full chunk
 set appears as the leaf set of some node in the tree (16 stories at
-4k) — and asserts the paper's reference counts: average 9/16,
+4k) — and asserts the hand-verified reference counts: average 9/16,
 complete 10/16, ward 10/16, single 5/16. On any mismatch it stops
 without writing.
 
@@ -54,7 +54,7 @@ SCALES = ("1k", "2k", "4k")
 LINKAGES = ("average", "complete", "ward", "single")
 
 N_STORIES_4K = 16
-# 论文参考值：4k 树状图中精确故事子树数（整篇切片恰好构成一个子树）
+# 手算验证参考值：4k 树状图中精确故事子树数（整篇切片恰好构成一个子树）
 REF_EXACT_4K = {"average": 9, "complete": 10, "ward": 10, "single": 5}
 
 

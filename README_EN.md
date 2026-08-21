@@ -15,6 +15,12 @@ The application ships with:
 > Note: the GUI interface is in Chinese; the CLI pipeline and its
 > documentation are in English.
 
+The experiment pipeline (`experiments/`) is a general-purpose grouped
+stylometry pipeline: it takes any corpus organized as "first-level
+subdirectory = group" and produces distance matrices, cluster dendrograms,
+and statistical test reports — suitable for grouped-comparison studies such
+as authorship attribution and translator-style analysis.
+
 ## Installation
 
 Requires Python 3.8+.
@@ -160,9 +166,9 @@ Burrows' Delta pipeline (Delta matrix, Delta-based signal competition,
 dendrogram) never reads the fingerprint weight configuration, so those
 results are weight-independent by construction.
 
-### Step 4 (optional): paper data exports (v2.3.1)
+### Step 4 (optional): benchmark statistics exports (v2.3.1)
 
-`export_paper_data.py` writes the paper's data artifacts in one pass from
+`export_paper_data.py` writes the benchmark data artifacts in one pass from
 the raw corpus root (one subdirectory per group, full unsliced texts):
 
 ```bash
@@ -192,10 +198,10 @@ python experiments/export_paper_data.py --input corpus \
 - `results/tokenizer_control/<scale>/` — a full pipeline rerun with the
   tokenizer changed to `[A-Za-z']+` (contractions kept), CSVs only
   (delta_matrix / nn_predictions / signal_competition /
-  fingerprint_pairs); a control check, not part of the paper's main
-  tables. Use `--skip-control` to export only the `data/` artifacts.
+  fingerprint_pairs); a control check, archived as a robustness control.
+  Use `--skip-control` to export only the `data/` artifacts.
 
-Release bundle (v2.4.1) — remaining artifacts referenced by the paper:
+Release bundle (v2.4.1) — remaining research-release artifacts:
 
 - `data/delta_matrix_4k.csv` — the 4k chunk-level Delta matrix (46
   chunks) referenced above; format identical to the 1k/2k matrices.
@@ -216,7 +222,7 @@ Release bundle (v2.4.1) — remaining artifacts referenced by the paper:
   under four linkage rules (average / complete / Ward / single) for all
   three scales, 4 linkage x 3 scale = 12 PNGs
   (`scripts/export_linkage_dendrograms.py`; average linkage reproduces
-  the pipeline's native clustering; the script asserts the paper's 4k
+  the pipeline's native clustering; the script asserts the hand-verified 4k
   exact-story-subtree reference counts before writing).
 - `data/weight_sensitivity.csv` — fingerprint weight-sensitivity long
   table (38 variants x 3 scales, 114 rows): within/between group means,
@@ -277,7 +283,7 @@ The runner is a thin pytest wrapper (pytest is declared in
   ~1.5e-7 error).
 - Scope: on rerun, the GUI fingerprint page's `p_value_wilcoxon` and the
   experiment pipeline's chunk-level `p_wilcoxon` (one of report.md's headline
-  statistics) are updated to the standard definition; the paper's
+  statistics) are updated to the standard definition; the main-analysis
   story-level tests go through `story_stats.wilcoxon_stats` and are
   unchanged; all other outputs (Delta matrices, signal competition,
   dendrogram, 1-NN, ...) are unaffected.
@@ -323,18 +329,18 @@ weight_sensitivity CSVs, report.md, dendrogram).
 - `scripts/export_linkage_dendrograms.py` now also exports Ward linkage
   (Ward.D2, Lance-Williams update on squared distances):
   `results/dendrograms/` holds 4 linkage x 3 scale = 12 PNGs. Before
-  writing, the script asserts the paper's 4k exact-story-subtree counts
+  writing, the script asserts the hand-verified 4k exact-story-subtree counts
   (a story counts when its full chunk set appears as one node's leaf
   set): average 9/16, complete 10/16, ward 10/16, single 5/16 — any
   mismatch stops the export.
 - `data/weight_sensitivity.csv` committed (38 variants x 3 scales, 114
-  rows; referenced by paper sections 4.3/5.4) and mirrored as
+  rows) and mirrored as
   `results/weight_sensitivity.csv`, same placement pattern as
   `mfw_sensitivity.csv`.
 
 ## Changelog note: v2.4.1 — release data completion (no code changes)
 
-Post-hoc analyses and the remaining paper artifacts; the pipeline itself
+Post-hoc analyses and the remaining research-release artifacts; the pipeline itself
 is untouched.
 
 - `scripts/posthoc_v9.py` (new, standalone): (1) aggregate metrics with
@@ -365,7 +371,8 @@ is untouched.
   repository (`corpus/` is gitignored by default).
 - The exports under `data/` and `results/` are **derived statistics**
   (word lists, distance matrices, per-dimension scores) with no expressive
-  content from the source texts, and are safe to publish with the paper.
+  content from the source texts, and are safe to publish with the research
+  results.
 
 ## License
 

@@ -94,7 +94,7 @@ def zscore(freq_table: Dict[str, object]) -> Dict[str, object]:
     """对特征词相对频率做 z 分数标准化。
 
     对每个特征词，按其在所有文本上的均值与总体标准差
-    （除以 N，Burrows 原论文用法）做标准化。
+    （除以 N，Burrows 原始研究用法）做标准化。
     标准差为 0 的特征词（在所有文本中频率完全一致）被剔除并记录。
 
     :param freq_table: ``build_freq_table`` 的返回结果

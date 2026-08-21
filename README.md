@@ -6,6 +6,8 @@
 
 > 基于 Python + Tkinter 的跨语言 NLP 桌面工具 — 分词 · 依存句法 · 情感分析 · 语言指纹 · 可读性 · 图表
 
+实验管线（experiments/）为通用分组文体计量流水线：输入按"一级子目录=组别"组织的任意语料，输出距离矩阵、聚类树状图与统计检验报告，适用于作者识别、译者风格等分组比较研究。
+
 **作者：** [Fragesius](https://github.com/Fragesius)
 
 ---
@@ -120,7 +122,7 @@ MIT © 2026 Fragesius
 
 - 仓库代码采用 MIT 许可；`experiments/sample_corpus/` 为程序生成的**合成语料**，不含任何真实作品文本。
 - 研究语料（如鲁迅小说的双译本）**不随仓库分发**：译本受译者/出版方版权保护，请自行合法获取并仅作个人研究用途，切勿将原文提交进本仓库或任何公开仓库（`.gitignore` 已默认排除 `corpus/`）。
-- `data/` 与 `results/` 下的导出物为**派生统计数据**（词表、距离矩阵、维度得分），不含原文表达性内容，可随论文公开。
+- `data/` 与 `results/` 下的导出物为**派生统计数据**（词表、距离矩阵、维度得分），不含原文表达性内容，可随研究成果公开。
 
 ---
 
@@ -131,16 +133,15 @@ MIT © 2026 Fragesius
 - `scripts/export_linkage_dendrograms.py` 新增 Ward 联结导出
   （Ward.D2，平方距离上的 Lance-Williams 更新）：
   `results/dendrograms/` 现为 4 联结 × 3 尺度 = 12 张 PNG。写入前
-  断言论文 4k 精确故事子树参考值（整篇切片恰好构成一个子树计 1 篇）：
+  断言 4k 尺度手算验证参考值（整篇切片恰好构成一个子树计 1 篇）：
   average 9/16、complete 10/16、ward 10/16、single 5/16——任何一项
   对不上即停止导出。
-- `data/weight_sensitivity.csv` 入库（38 变体 × 3 尺度，114 行；
-  论文 §4.3/§5.4 引用），并镜像为 `results/weight_sensitivity.csv`，
+- `data/weight_sensitivity.csv` 入库（38 变体 × 3 尺度，114 行），并镜像为 `results/weight_sensitivity.csv`，
   落位模式同 `mfw_sensitivity.csv`。
 
 ### v2.4.1 — 发布数据补齐（不动核心算法）
 
-论文配套的事后分析与剩余发布产物；pipeline 主逻辑零改动。
+事后分析（post-hoc）与剩余发布产物；pipeline 主逻辑零改动。
 
 - `scripts/posthoc_v9.py`（新增独立脚本）：(1) 剔除全部同故事对后的
   聚合指标——指纹 Cohen's d（pooled SD，与主分析同一公式）与 Delta
@@ -198,7 +199,7 @@ ws: byte-identical         # weight_sensitivity.csv（38 变体 × 3 尺度，11
   改用 `math.erfc` 精确计算（旧版 Abramowitz & Stegun 7.1.26 近似，
   误差 ~1.5e-7）。
 - 影响范围：GUI 语言指纹页的 `p_value_wilcoxon` 与实验管线的 chunk 级
-  `p_wilcoxon`（report.md 头条统计之一）在重跑时按标准定义更新；论文
+  `p_wilcoxon`（report.md 头条统计之一）在重跑时按标准定义更新；主分析
   story_level_tests 走 `story_stats.wilcoxon_stats`，数值不变；其余输出
   （Delta 矩阵、信号竞争、树状图、1-NN 等）不受影响。
 - 两个 Wilcoxon 实现均注明：p 为正态近似（无连续性校正、无平局方差校正；
@@ -209,7 +210,7 @@ ws: byte-identical         # weight_sensitivity.csv（38 变体 × 3 尺度，11
 
 ### v2.3.1 — 数据导出小版本（不动核心算法）
 
-📤 **论文数据一键导出（`experiments/export_paper_data.py`，新增）**
+📤 **基准统计数据一键导出（`experiments/export_paper_data.py`，新增）**
 
 ```bash
 python experiments/export_paper_data.py --input corpus \
@@ -220,7 +221,7 @@ python experiments/export_paper_data.py --input corpus \
 - `data/delta_matrix_1k.csv` / `delta_matrix_2k.csv`：1k/2k 尺度 chunk 级 Delta 矩阵；格式与既有 `delta_matrix_4k.csv` 逐字节兼容（UTF-8 BOM、空角单元格、6 位小数）；各尺度在切片上重新拟合 100 MFW（同 `run_experiment.py` 惯例）
 - `data/feature_scores.csv`：每 chunk × 每尺度（1k/2k/4k）的指纹八维分量得分（chunk 对本组质心的各维相似度，即加权余弦加权前的八个分量）+ 默认权重加权和
 - `data/mfw_sensitivity.csv`：MFW 数量敏感性扫描（top-n 取 50/100/200/500 × 三尺度，12 行）：aggregate Cohen's d 与信号竞争胜场；d 随尺度单调、对 n 不变（d 来自指纹路径，与 MFW 词表无关），胜场合计 47/48，头条结论不翻转
-- `results/tokenizer_control/<尺度>/`：分词器对照跑（`[A-Za-z']+` 保留缩略词），三尺度全管线重跑，只产 CSV（delta_matrix / nn_predictions / signal_competition / fingerprint_pairs），不进论文主表
+- `results/tokenizer_control/<尺度>/`：分词器对照跑（`[A-Za-z']+` 保留缩略词），三尺度全管线重跑，只产 CSV（delta_matrix / nn_predictions / signal_competition / fingerprint_pairs），作为稳健性对照存档
 
 🔧 **核心小幅重构（行为不变）**
 - `core/linguistic_fingerprint.py` 拆出 `dimension_scores()`（八维分量），`weighted_cosine_similarity()` 改为在其上加权，默认路径逐字节不变

@@ -156,7 +156,7 @@ class ExperimentTab(ctk.CTkFrame):
         self.progress_bar.set(0)
         self._progress_queue: "queue.Queue[tuple]" = queue.Queue()
 
-        # ══ 权重敏感性（v2.3.0，论文附录 B）══
+        # ══ 权重敏感性（v2.3.0）══
         sens_card = Card(right, "⚖ 权重敏感性")
         sens_card.pack(fill="x", padx=6, pady=4)
 

@@ -1,4 +1,4 @@
-"""Post-hoc analyses for the v9 paper revision (no pipeline changes).
+"""Post-hoc analyses for the v9 study revision (no pipeline changes).
 
 Two analyses over the released chunk-level data, both with all
 "same-story" pairs removed or tabulated:

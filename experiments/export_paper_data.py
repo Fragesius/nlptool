@@ -1,4 +1,4 @@
-"""Paper data export utilities (v2.3.1) — data export only, no algorithm
+"""Benchmark statistics export utilities (v2.3.1) — data export only, no algorithm
 changes.
 
 Driven from one corpus root (one subdirectory per group, full unsliced
@@ -30,7 +30,7 @@ Driven from one corpus root (one subdirectory per group, full unsliced
    ``results/tokenizer_control/<scale>/``. The fingerprint leg uses
    ``core.analyzer`` tokenization and is therefore unaffected by this
    control; it is included only for completeness of the pipeline rerun.
-   Control results are not meant for the paper's main tables.
+   Control results are archived as robustness controls, not headline tables.
 
 Usage:
     python experiments/export_paper_data.py --input corpus \
@@ -340,7 +340,7 @@ def run_tokenizer_control(input_dir: Path, out_root: Path,
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Export paper data artifacts (v2.3.1): MFW wordlist, "
+        description="Export benchmark statistics artifacts (v2.3.1): MFW wordlist, "
                     "chunk-level Delta matrices, per-dimension fingerprint "
                     "scores, and the tokenizer control run")
     parser.add_argument("--input", required=True,
